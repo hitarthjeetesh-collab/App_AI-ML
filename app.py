@@ -1,8 +1,4 @@
 import streamlit as st
-import chromadb
-
-client = chromadb.PersistentClient(path="./chroma_db")
-collection = client.get_collection("memories")
 
 if "x" not in st.session_state:
     st.session_state.x = 0
