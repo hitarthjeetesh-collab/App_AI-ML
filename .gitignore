@@ -1,0 +1,71 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+dist/
+eggs/
+*.egg-info/
+*.egg
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+.ENV/
+venv.bak/
+venvs/
+
+# Conda
+.conda/
+
+# Jupyter
+.ipynb_checkpoints
+
+# PyCharm
+.idea/
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Python testing
+.pytest_cache/
+
+# Logs, databases, and models
+*.log
+*.sqlite3
+*.db
+*.ckpt
+*.pth
+*.pt
+*.h5
+results/
+data/
+models/
+
+# Assistant/tooling
+.ollamassist/
+
+.env
+.env

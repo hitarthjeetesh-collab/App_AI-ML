@@ -1,0 +1,5 @@
+torch
+openai
+python-dotenv
+chromadb
+streamlit
