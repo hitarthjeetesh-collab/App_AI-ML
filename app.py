@@ -25,20 +25,6 @@ with st.sidebar:
     response_style = st.radio("How are you want the ai to respond?", ("Talkative", "Neutral", "Concise"))
     creativity = st.slider("How creative do you want the ai to be?", 0.0, 1.0, 0.5, 0.01)
 
-
-
-with st.sidebar:
-    st.subheader("Memory")
-
-    data = collection.get()
-
-    if data["ids"]:
-        st.dataframe({
-            "ID": data["ids"],
-            "Memory": data["documents"],
-        }, hide_index=True)
-    else:
-        st.write("No memories stored.")
 prompt = st.text_input("Enter your question here: ")
 
 st.button("submit", key="submit", on_click=submit)
