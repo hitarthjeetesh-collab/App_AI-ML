@@ -1,8 +1,6 @@
 import streamlit as st
 import chromadb
 
-from main.py import add_memory
-
 client = chromadb.PersistentClient(path="./chroma_db")
 collection = client.get_collection("memories")
 
