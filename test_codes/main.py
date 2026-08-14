@@ -16,9 +16,6 @@ def add_memory(new_doc):
         ids=[new_id],
     )
 
-print("\n stored:", memories.count(), "facts" )
-
-question = input("user: ")
 
 results = memories.query(query_texts=[question], n_results=5)
 
@@ -44,9 +41,7 @@ r = client.chat.completions.create(
         {"role": "user", "content": question},
     ],
 )
-add_memory(f"user: {question}\n assistant: {r.choices[0].message.content}")
-
-print(r.choices[0].message.content)
+#add_memory(f"user: {question}\n assistant: {r.choices[0].message.content}")
 
 def question(question):
     return r.choices[0].message.content
