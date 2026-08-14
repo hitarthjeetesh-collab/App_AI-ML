@@ -1,8 +1,27 @@
 import streamlit as st
-from test_codes.main import question
+import os
 
-if "x" not in st.session_state:
-    st.session_state.x = 0
+from dotenv import load_dotenv
+from openai import OpenAI
+
+load_dotenv()
+client = OpenAI(
+base_url="https://api.groq.com/openai/v1",
+api_key=os.getenv("GITHUB_TOKEN"),
+)
+
+
+def question(question):
+    r = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        temperature=creativity,
+        messages=[
+            {"role": "system", "content": "You are a helpful memory-based assistant."},
+            {"role": "system", "content": f"use this response style: {response_style}"},
+            {"role": "user", "content": question},
+        ],
+    )
+    return r.choices[0].message.content
 
 
 def submit():
