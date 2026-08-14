@@ -22,4 +22,3 @@ Users can change settings such as:
 - Safety priority
 - Units (metric/imperial)
 - Explanation level
-- Explanation style

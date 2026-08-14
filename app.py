@@ -19,12 +19,13 @@ def question(question):
             {"role": "system", "content": "You are a helpful memory-based assistant."},
             {"role": "system", "content": f"use this for response lenght: {response_length}"},
             {"role": "system", "content": f"this is your response style: {style}"},
-            {"role": "system", "content": f"this is your response units: {units}"},
-            {"role": "system", "content": f"this is your response engineering explanation level: {explanation_level}"},
+            {"role": "system", "content": f"use this for response creativity out of 1.0: {creativity}"},
             {"role": "system", "content": f"this is your cost priority out of 1.0: {cost_priority}"},
             {"role": "system", "content": f"this is your performance priority out of 1.0: {performance_priority}"},
             {"role": "system", "content": f"this is your reliability priority out of 1.0: {reliability_priority}"},
             {"role": "system", "content": f"this is your safety priority out of 1.0: {safety_priority}"},
+            {"role": "system", "content": f"this is your response units: {units}"},
+            {"role": "system", "content": f"this is your response engineering explanation level: {explanation_level}"},
             {"role": "user", "content": question},
         ],
     )
@@ -47,6 +48,7 @@ with st.sidebar:
     performance_priority = st.slider("How important is performance to you?", 0.0, 1.0, 0.5, 0.01)
     reliability_priority = st.slider("How important is reliability to you?", 0.0, 1.0, 0.5, 0.01)
     safety_priority = st.slider("How important is safety to you?", 0.0, 1.0, 0.5, 0.01)
+
 
 prompt = st.chat_input("Enter your question here: ")
 response = question(prompt) if prompt else ("you haven't asked a question yet.")
