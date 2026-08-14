@@ -21,6 +21,6 @@ with st.sidebar:
     response_style = st.radio("How are you want the ai to respond?", ("Talkative", "Neutral", "Concise"))
     creativity = st.slider("How creative do you want the ai to be?", 0.0, 1.0, 0.5, 0.01)
 
-prompt = st.text_input("Enter your question here: ")
+prompt = st.chat_input("Enter your question here: ")
 
 st.button("submit", key="submit", on_click=submit)
