@@ -1,0 +1,25 @@
+Engineering AI
+
+An AI engineering assistant that helps users design, troubleshoot, and improve engineering projects.
+
+Users can describe a project, and the AI can help with:
+
+- Design decisions
+- Component selection
+- Basic engineering calculations
+- Troubleshooting
+- Cost and performance optimization
+- Safety considerations
+
+Users can change settings such as:
+
+- Response length
+- Style
+- Creativity
+- Cost priority
+- Performance priority
+- Reliability priority
+- Safety priority
+- Units (metric/imperial)
+- Explanation level
+- Explanation style
