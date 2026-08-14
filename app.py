@@ -8,7 +8,7 @@ def submit():
     st.session_state.x += 1
 
 
-st.title("RAG-Based AI App")
+st.title("RAG-Based AI")
 
 st.subheader("Details")
 st.write("Model: llama-3.3-70b-versatile")
