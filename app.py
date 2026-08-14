@@ -9,13 +9,6 @@ def submit():
 
 
 st.title("RAG-Based AI")
-
-st.subheader("Details")
-st.write("Model: llama-3.3-70b-versatile")
-st.write("Memory: ChromaDB")
-
-st.subheader("Instructions")
-st.write("Ask a question and the AI will answer based on the stored memories.")
 with st.sidebar:
     st.subheader("Settings")
     response_style = st.radio("How are you want the ai to respond?", ("Talkative", "Neutral", "Concise"))
