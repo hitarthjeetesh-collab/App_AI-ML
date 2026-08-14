@@ -49,4 +49,4 @@ add_memory(f"user: {question}\n assistant: {r.choices[0].message.content}")
 print(r.choices[0].message.content)
 
 def question(question):
-    results = memories.query(query_texts=[question], n_results=5)
+    return r.choices[0].message.content

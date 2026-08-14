@@ -1,4 +1,5 @@
 import streamlit as st
+from test_codes.main import question
 
 if "x" not in st.session_state:
     st.session_state.x = 0
@@ -15,7 +16,8 @@ with st.sidebar:
     creativity = st.slider("How creative do you want the ai to be?", 0.0, 1.0, 0.5, 0.01)
 
 prompt = st.chat_input("Enter your question here: ")
-response = "This is a placeholder response. The AI will answer based on the stored memories."
+response = question(prompt) if prompt else ("you haven't asked a question yet.")
+
 if prompt:
     with st.chat_message("user"):
         st.write(prompt)
