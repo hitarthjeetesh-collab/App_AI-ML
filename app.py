@@ -17,6 +17,7 @@ def question(question):
         temperature=creativity,
         messages=[
             {"role": "system", "content": "You are a helpful memory-based assistant."},
+            {"role": "system", "content": "you are a engineering assistant meant to help with engineering tasks, such as brainstorming, design, and analysis."},
             {"role": "system", "content": f"use this for response lenght: {response_length}"},
             {"role": "system", "content": f"this is your response style: {style}"},
             {"role": "system", "content": f"use this for response creativity out of 1.0: {creativity}"},
@@ -36,7 +37,7 @@ def submit():
     st.session_state.x += 1
 
 
-st.title("RAG-Based AI")
+st.title("Engineering Assistant")
 with st.sidebar:
     st.subheader("Settings")
     response_length = st.radio("How are you want the ai to respond?", ("Talkative", "Balanced", "Concise"))
