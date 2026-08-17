@@ -285,6 +285,7 @@ with st.sidebar:
             "Concise",
         ),
         horizontal=True,
+        index=1,
     )
 
     # --------------------------------------------------------
@@ -313,6 +314,7 @@ with st.sidebar:
             "Advanced",
         ),
         horizontal=True,
+        index=2,
     )
 
     # --------------------------------------------------------
@@ -338,6 +340,7 @@ with st.sidebar:
             "Imperial",
         ),
         horizontal=True,
+        index=0,
     )
 
     # ========================================================
