@@ -376,27 +376,19 @@ conversation rather than forcing an engineering response.
                 stream=True,
             )
 
+            # --------------------------------------------------------
+            # Create the UI ONCE
+            # --------------------------------------------------------
 
-            # -----------------------------------------------
-            # UI CONTAINERS
-            # -----------------------------------------------
-
-            thinking_container = st.container()
-
-            answer_container = st.empty()
-
-
-            # -----------------------------------------------
-            # State
-            # -----------------------------------------------
+            thinking_placeholder = st.empty()
+            answer_placeholder = st.empty()
 
             reasoning_text = ""
             answer_text = ""
 
-
-            # -----------------------------------------------
+            # --------------------------------------------------------
             # Stream
-            # -----------------------------------------------
+            # --------------------------------------------------------
 
             for chunk in stream:
 
@@ -405,10 +397,9 @@ conversation rather than forcing an engineering response.
 
                 delta = chunk.choices[0].delta
 
-
-                # ===========================================
+                # ====================================================
                 # REASONING
-                # ===========================================
+                # ====================================================
 
                 reasoning = getattr(
                     delta,
@@ -424,53 +415,41 @@ conversation rather than forcing an engineering response.
                         reasoning_text
                     )
 
+                    # Build the entire reasoning UI as markdown
+                    reasoning_ui = "### Engineering Process\n\n"
 
-                    # ---------------------------------------
-                    # Render Engineering Process
-                    # ---------------------------------------
+                    if not steps:
 
-                    with thinking_container:
+                        reasoning_ui += "Analyzing problem..."
 
-                        with st.expander(
-                            "Engineering Process",
-                            expanded=True
-                        ):
+                    else:
 
-                            if not steps:
+                        for i, (step, detail) in enumerate(steps):
 
-                                st.caption(
-                                    "Analyzing problem..."
-                                )
+                            # Latest step
+                            if i == len(steps) - 1:
+                                icon = "🔵"
 
                             else:
+                                icon = "✓"
 
-                                for i, (step, detail) in enumerate(steps):
+                            reasoning_ui += (
+                                f"{icon} **{i + 1}. {step}**\n\n"
+                            )
 
-                                    # Latest step
-                                    if i == len(steps) - 1:
+                            if detail:
+                                reasoning_ui += (
+                                    f"&nbsp;&nbsp;&nbsp;{detail}\n\n"
+                                )
 
-                                        icon = "●"
+                    # Update ONE placeholder
+                    thinking_placeholder.markdown(
+                        reasoning_ui
+                    )
 
-                                    else:
-
-                                        icon = "✓"
-
-
-                                    st.markdown(
-                                        f"**{icon} {i + 1}. {step}**"
-                                    )
-
-
-                                    if detail:
-
-                                        st.caption(
-                                            detail
-                                        )
-
-
-                # ===========================================
+                # ====================================================
                 # FINAL ANSWER
-                # ===========================================
+                # ====================================================
 
                 content = getattr(
                     delta,
@@ -479,17 +458,15 @@ conversation rather than forcing an engineering response.
                 )
 
                 if content:
-
                     answer_text += content
 
-                    answer_container.markdown(
+                    answer_placeholder.markdown(
                         answer_text
                     )
 
-
-            # =================================================
-            # SAVE AI RESPONSE
-            # =================================================
+            # --------------------------------------------------------
+            # Save assistant message
+            # --------------------------------------------------------
 
             st.session_state.messages.append(
                 {
