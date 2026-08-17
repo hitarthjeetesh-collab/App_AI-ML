@@ -47,57 +47,176 @@ def clean_latex(text):
     """
     Clean common malformed LaTeX formatting produced by models.
 
-    This does NOT modify normal Markdown or properly formatted LaTeX.
+    Converts:
+        [ equation ]
+        [ multiline equation ]
+        \[ equation \]
+        \( equation \)
+
+    into Streamlit-compatible Markdown LaTeX:
+
+        $$
+        equation
+        $$
+
+    Normal Markdown square brackets are left alone whenever possible.
     """
 
     if not text:
         return text
 
-    # --------------------------------------------------------
-    # Convert common square-bracket equation formatting
-    #
-    # Example:
-    #
-    # [ F_{total} = F_{grade} + F_{rr} ]
-    #
-    # becomes:
-    #
-    # $$
-    # F_{total} = F_{grade} + F_{rr}
-    # $$
-    # --------------------------------------------------------
+    # ========================================================
+    # 1. NORMALIZE COMMON LATEX DELIMITERS
+    # ========================================================
+
+    # \[ ... \]  ->  $$ ... $$
+    text = re.sub(
+        r"\\\[\s*([\s\S]*?)\s*\\\]",
+        lambda m: f"\n\n$$\n{m.group(1).strip()}\n$$\n\n",
+        text,
+    )
+
+    # \( ... \)  ->  $ ... $
+    text = re.sub(
+        r"\\\(\s*(.*?)\s*\\\)",
+        lambda m: f"${m.group(1).strip()}$",
+        text,
+        flags=re.DOTALL,
+    )
+
+    # ========================================================
+    # 2. CONVERT BARE SQUARE-BRACKET EQUATIONS
+    # ========================================================
 
     def replace_square_equation(match):
         equation = match.group(1).strip()
 
-        # Only convert if it looks mathematical.
-        math_indicators = [
-            "\\",
+        # ----------------------------------------------------
+        # Determine whether the contents actually look like
+        # mathematics.
+        # ----------------------------------------------------
+
+        math_indicators = (
             "=",
+            "\\",
             "^",
             "_",
             "\\frac",
             "\\sin",
             "\\cos",
             "\\tan",
+            "\\sqrt",
             "\\times",
             "\\approx",
+            "\\sum",
+            "\\int",
+            "\\omega",
+            "\\theta",
+            "\\eta",
             "∑",
             "√",
             "π",
-        ]
+            "≈",
+            "×",
+            "≤",
+            "≥",
+        )
 
-        if any(indicator in equation for indicator in math_indicators):
-            return f"\n\n$$\n{equation}\n$$\n\n"
+        looks_like_math = any(
+            indicator in equation
+            for indicator in math_indicators
+        )
 
-        return match.group(0)
+        if not looks_like_math:
+            return match.group(0)
 
-    # Only process single-line square bracket equations.
+        # ----------------------------------------------------
+        # Don't convert things that look like ordinary
+        # Markdown links.
+        # ----------------------------------------------------
+
+        if "http://" in equation or "https://" in equation:
+            return match.group(0)
+
+        return (
+            "\n\n"
+            "$$\n"
+            f"{equation}"
+            "\n$$"
+            "\n\n"
+        )
+
+    # --------------------------------------------------------
+    # Handle multiline [ ... ] equations.
+    #
+    # DOTALL allows the equation to span multiple lines.
+    # --------------------------------------------------------
+
     text = re.sub(
-        r"\[\s*([^\[\]\n]{3,500})\s*\]",
+        r"(?<!\!)\[\s*([\s\S]*?)\s*\]",
         replace_square_equation,
         text,
     )
+
+    # ========================================================
+    # 3. CLEAN COMMON MODEL OUTPUT ERRORS
+    # ========================================================
+
+    # Remove accidental escaped Markdown dollar signs.
+    text = text.replace(r"\$", "$")
+
+    # Convert accidental display delimiters if they survived.
+    text = text.replace(r"\[", "$$")
+    text = text.replace(r"\]", "$$")
+
+    # ========================================================
+    # 4. FIX SOME COMMON LATEX ESCAPING PROBLEMS
+    # ========================================================
+
+    # Models sometimes output double-escaped LaTeX commands.
+    #
+    # Example:
+    #
+    # \\sin
+    #
+    # instead of:
+    #
+    # \sin
+    #
+    # Only fix common mathematical commands so we don't
+    # blindly alter arbitrary text.
+    #
+
+    latex_commands = [
+        "frac",
+        "sqrt",
+        "sin",
+        "cos",
+        "tan",
+        "log",
+        "ln",
+        "exp",
+        "times",
+        "approx",
+        "pm",
+        "omega",
+        "theta",
+        "eta",
+        "mu",
+        "pi",
+        "sum",
+        "int",
+        "cdot",
+        "text",
+        "begin",
+        "end",
+    ]
+
+    for command in latex_commands:
+        text = text.replace(
+            f"\\\\{command}",
+            f"\\{command}",
+        )
 
     return text
 
