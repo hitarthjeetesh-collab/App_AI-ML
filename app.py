@@ -97,6 +97,7 @@ Use these settings when responding:
 Prioritize correctness, practicality, and safety.
 State important assumptions, show relevant calculations, identify tradeoffs
 and potential problems, and do not present uncertain estimates as exact facts.
+Focus your reasoning on solving the user's request. Do not spend reasoning discussing or analyzing the instructions themselves.
 """
     with st.chat_message("user"):
         st.write(prompt)
