@@ -17,6 +17,8 @@ client = OpenAI(
     api_key=os.getenv("GROQ_API_KEY"),
 )
 
+max_tokens = 65,536
+
 
 # ============================================================
 # SESSION STATE
@@ -655,6 +657,8 @@ if prompt:
 
                     reasoning_effort=reasoning_effort,
 
+                    max_completion_tokens=max_tokens,
+
                     stream=True,
                 )
 
@@ -798,6 +802,8 @@ if prompt:
                         temperature=creativity,
 
                         reasoning_effort=reasoning_effort,
+
+                        max_completion_tokens=max_tokens,
                     )
 
                 except Exception as e:
