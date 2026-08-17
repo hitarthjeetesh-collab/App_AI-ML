@@ -17,7 +17,24 @@ client = OpenAI(
     api_key=os.getenv("GROQ_API_KEY"),
 )
 
-MAX_TOKENS = 4000
+# Maximum output tokens.
+#
+# The selected Groq models support up to approximately 8K
+# completion tokens. 8000 gives the assistant enough room
+# for detailed engineering calculations without unnecessarily
+# requesting more than the model supports.
+MAX_COMPLETION_TOKENS = 8000
+
+# Number of previous messages sent to the model.
+#
+# 4 messages =
+# User
+# Assistant
+# User
+# Assistant
+#
+# The complete conversation remains stored locally in
+# st.session_state.
 MAX_HISTORY_MESSAGES = 4
 
 
@@ -46,8 +63,8 @@ if "messages" not in st.session_state:
 
 def clean_latex(text):
     """
-    Clean common LaTeX formatting problems without
-    modifying normal Markdown such as headings.
+    Clean common malformed LaTeX without modifying
+    normal Markdown headings, tables, or prose.
     """
 
     if not text:
@@ -60,11 +77,18 @@ def clean_latex(text):
     text = text.replace(r"\$", "$")
 
     # --------------------------------------------------------
-    # Fix common corrupted [4pt] alignment endings
+    # Fix corrupted alignment spacing such as:
+    #
+    # \$$4pt]
+    # \\$4pt]
+    # \$4pt]
+    # \\[4pt]
+    #
+    # Convert these to a normal LaTeX line break.
     # --------------------------------------------------------
 
     text = re.sub(
-        r"(?:\\+|\$+)?\s*\$?\s*4pt\s*\]",
+        r"(?:\\+|\$+)?\s*\$?\s*\[?\s*4pt\s*\]",
         r"\\\\",
         text,
         flags=re.IGNORECASE,
@@ -137,7 +161,7 @@ def clean_latex(text):
     )
 
     # --------------------------------------------------------
-    # Fix aligned equations that are missing $$ delimiters
+    # Fix aligned environments missing $$ delimiters
     # --------------------------------------------------------
 
     aligned_pattern = re.compile(
@@ -188,7 +212,7 @@ def clean_latex(text):
 
 def render_markdown(text):
     """
-    Render model output as Streamlit Markdown.
+    Render cleaned model output through Streamlit Markdown.
     """
 
     if not text:
@@ -207,30 +231,32 @@ with st.sidebar:
 
     st.subheader("Settings")
 
-    # --------------------------------------------------------
+    # ========================================================
     # MODEL
-    # --------------------------------------------------------
+    # ========================================================
 
     model = st.selectbox(
         "Model",
         (
             "openai/gpt-oss-120b",
+            "qwen/qwen3.6-27b",
             "openai/gpt-oss-20b",
         ),
+        index=0,
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # STREAMING
-    # --------------------------------------------------------
+    # ========================================================
 
     stream_it = st.toggle(
         "Stream response",
         value=True,
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # RESPONSE LENGTH
-    # --------------------------------------------------------
+    # ========================================================
 
     response_length = st.radio(
         "Response length",
@@ -243,9 +269,9 @@ with st.sidebar:
         index=1,
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # RESPONSE STYLE
-    # --------------------------------------------------------
+    # ========================================================
 
     style = st.radio(
         "Response style",
@@ -258,9 +284,9 @@ with st.sidebar:
         index=0,
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # EXPLANATION LEVEL
-    # --------------------------------------------------------
+    # ========================================================
 
     explanation_level = st.radio(
         "Explanation detail",
@@ -273,9 +299,9 @@ with st.sidebar:
         index=2,
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # CREATIVITY
-    # --------------------------------------------------------
+    # ========================================================
 
     creativity = st.slider(
         "Creativity",
@@ -285,9 +311,9 @@ with st.sidebar:
         step=0.01,
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # UNITS
-    # --------------------------------------------------------
+    # ========================================================
 
     units = st.radio(
         "Units",
@@ -361,9 +387,7 @@ with st.sidebar:
         "Clear chat",
         use_container_width=True,
     ):
-
         st.session_state.messages = []
-
         st.rerun()
 
     # ========================================================
@@ -377,20 +401,6 @@ with st.sidebar:
 
 # ============================================================
 # SYSTEM PROMPT
-# ============================================================
-#
-# IMPORTANT:
-#
-# This is intentionally NOT an f-string.
-#
-# LaTeX contains many { } characters, for example:
-#
-# \text{N}
-# \frac{a}{b}
-# \begin{aligned}
-#
-# Using an f-string here would cause Python to interpret
-# those braces as Python expressions.
 # ============================================================
 
 system_prompt = r"""
@@ -416,7 +426,7 @@ Your job is to help the user with robotics engineering, including:
 RESPONSE SETTINGS
 ============================================================
 
-Follow the settings provided below.
+Follow the current user settings provided after this prompt.
 
 ============================================================
 ENGINEERING BEHAVIOR
@@ -437,215 +447,35 @@ For substantial engineering problems:
 
 Do not blindly accept assumptions if they produce an unrealistic design.
 
-For simple questions, answer directly without unnecessary detail.
+For simple questions, answer directly.
 
-For complex engineering questions, reason carefully before producing
-the final answer.
+For complex engineering questions, perform careful calculations
+before producing the final answer.
 
-============================================================
-MATHEMATICAL FORMATTING
-============================================================
-
-Use REAL LaTeX whenever displaying mathematical equations.
-
-The application uses Streamlit Markdown, which supports LaTeX.
-
-Inline mathematics:
-
-$F = ma$
-
-Display mathematics:
-
-$$
-F = ma
-$$
-
-For multi-line equations:
-
-$$
-\begin{aligned}
-F_{grade} &= mg\sin(\theta) \\
-F_{rr} &= C_{rr}mg\cos(\theta) \\
-F_{total} &= F_{grade} + F_{rr}
-\end{aligned}
-$$
-
-Use LaTeX commands such as:
-
-- \frac{a}{b}
-- \sqrt{x}
-- \sin(\theta)
-- \cos(\theta)
-- \tan(\theta)
-- \times
-- \approx
-- \omega
-- \theta
-- \eta
-- \text{N}
-- \text{W}
-- \text{kg}
-- \text{m/s}
+Do not invent manufacturer specifications.
 
 ============================================================
-LATEX SIMPLICITY RULE
+ENGINEERING CALCULATIONS
 ============================================================
 
-Prefer SIMPLE LaTeX.
+For engineering calculations:
 
-For most calculations, use separate display equations:
+- Show the governing equation.
+- Substitute the values.
+- Show the result.
+- Include units.
+- State important assumptions.
+- Check whether the result is physically reasonable.
 
-$$
-F_g = mg\sin(\theta)
-$$
+Prefer SI units unless the user selects Imperial.
 
-$$
-F_g =
-25 \times 9.81 \times \sin(10^\circ)
-\approx 42.6\ \text{N}
-$$
+When appropriate, distinguish:
 
-Only use the aligned environment when multiple equations genuinely
-need to be vertically aligned.
-
-When using aligned, ALWAYS use exactly this structure:
-
-$$
-\begin{aligned}
-F_g &= mg\sin(\theta) \\
-F_{rr} &= C_{rr}mg\cos(\theta) \\
-F_{total} &= F_g + F_{rr}
-\end{aligned}
-$$
-
-NEVER generate malformed constructs such as:
-
-\begin{aligned} ... \$$4pt] ... \end{aligned}
-
-NEVER generate:
-
-[ equation ]
-
-NEVER generate raw LaTeX outside a math delimiter.
-
-Do not use [4pt] spacing unless it is actually needed.
-
-Prefer normal line breaks with \\ inside aligned.
-
-============================================================
-VERY IMPORTANT LATEX RULES
-============================================================
-
-NEVER write mathematical equations using square brackets.
-
-BAD:
-
-[ F_{total} = F_{grade} + F_{rr} ]
-
-BAD:
-
-[ F = ma ]
-
-GOOD:
-
-$$
-F_{total} = F_{grade} + F_{rr}
-$$
-
-GOOD:
-
-$$
-F = ma
-$$
-
-Do NOT use square brackets as an alternative to LaTeX delimiters.
-
-Do NOT write raw LaTeX outside a Markdown math delimiter.
-
-Do NOT put equations inside Markdown code blocks.
-
-Do NOT escape LaTeX backslashes unnecessarily.
-
-The final response should contain normal Markdown-compatible LaTeX.
-
-For calculations, show the equation first and then substitute numbers.
-
-Example:
-
-$$
-F_{grade} = mg\sin(10^\circ)
-$$
-
-$$
-F_{grade}
-=
-25 \times 9.81 \times \sin(10^\circ)
-\approx 42.5\ \text{N}
-$$
-
-============================================================
-HEADINGS AND MARKDOWN
-============================================================
-
-Use normal Markdown headings when helpful.
-
-For example:
-
-### 4.2 Wheel torque
-
-Do NOT escape the # characters.
-
-Do NOT put headings inside code blocks.
-
-Do NOT put headings inside LaTeX delimiters.
-
-Tables may be used when they improve clarity.
-
-============================================================
-ENGINEERING PROCESS
-============================================================
-
-The application displays the model's reasoning separately inside an
-"Engineering Process" box.
-
-Do NOT write the heading "Engineering Process" yourself.
-
-Do NOT put the phrase "Engineering Process" at the beginning of
-your reasoning.
-
-Begin the reasoning directly with the engineering analysis.
-
-Example:
-
-"We first need to determine the force required to climb the incline."
-
-Then continue with calculations and reasoning.
-
-Use proper LaTeX inside the reasoning whenever appropriate.
-
-============================================================
-FINAL ANSWER
-============================================================
-
-The final answer should contain, when appropriate:
-
-1. Important requirements
-2. Assumptions
-3. Relevant equations
-4. Calculations
-5. Results
-6. Limiting conditions
-7. Practical component considerations
-8. Tradeoffs
-9. Recommendations
-
-Clearly distinguish calculated values from assumptions.
-
-For engineering calculations, show enough work that the user can
-verify the result.
-
-Do not unnecessarily repeat the entire engineering process in the
-final answer if it has already been shown separately.
+- continuous requirements
+- peak requirements
+- calculated values
+- design values
+- recommended component ratings
 
 ============================================================
 REAL-WORLD LOSSES
@@ -668,8 +498,159 @@ When relevant, explicitly consider:
 - Uneven terrain
 - Thermal limits
 
-Do not hide all losses behind a single efficiency number when the
+Do not hide all losses behind one efficiency number when the
 user specifically asks about real-world performance.
+
+============================================================
+MATHEMATICAL FORMATTING
+============================================================
+
+Use REAL LaTeX for mathematical equations.
+
+The application uses Streamlit Markdown.
+
+Inline mathematics:
+
+$F = ma$
+
+Display mathematics:
+
+$$
+F = ma
+$$
+
+For multi-line equations:
+
+$$
+\begin{aligned}
+F_{grade} &= mg\sin(\theta) \\
+F_{rr} &= C_{rr}mg\cos(\theta) \\
+F_{total} &= F_{grade} + F_{rr}
+\end{aligned}
+$$
+
+Use commands such as:
+
+\frac{a}{b}
+\sqrt{x}
+\sin(\theta)
+\cos(\theta)
+\times
+\approx
+\omega
+\theta
+\eta
+\text{N}
+\text{W}
+\text{kg}
+\text{m/s}
+
+============================================================
+LATEX SIMPLICITY
+============================================================
+
+Prefer simple LaTeX.
+
+For most calculations, use separate display equations.
+
+Example:
+
+$$
+F_g = mg\sin(\theta)
+$$
+
+$$
+F_g =
+25 \times 9.81 \times \sin(10^\circ)
+\approx 42.6\ \text{N}
+$$
+
+Only use aligned when several equations genuinely benefit
+from vertical alignment.
+
+When using aligned, use exactly:
+
+$$
+\begin{aligned}
+F_g &= mg\sin(\theta) \\
+F_{rr} &= C_{rr}mg\cos(\theta) \\
+F_{total} &= F_g + F_{rr}
+\end{aligned}
+$$
+
+NEVER generate malformed constructs such as:
+
+\begin{aligned} ... \$$4pt] ... \end{aligned}
+
+NEVER generate:
+
+[ equation ]
+
+NEVER write raw LaTeX outside a math delimiter.
+
+NEVER use square brackets as mathematical delimiters.
+
+NEVER put equations inside Markdown code blocks.
+
+Do not unnecessarily escape LaTeX backslashes.
+
+============================================================
+HEADINGS AND MARKDOWN
+============================================================
+
+Use normal Markdown headings when helpful.
+
+For example:
+
+### 4.2 Wheel torque
+
+Do not escape # characters.
+
+Do not put headings inside code blocks.
+
+Do not put headings inside LaTeX delimiters.
+
+Use tables when they improve clarity.
+
+============================================================
+ENGINEERING PROCESS
+============================================================
+
+The application displays model reasoning separately inside an
+"Engineering Process" box.
+
+Do NOT write the heading "Engineering Process" yourself.
+
+Do NOT begin reasoning with "Engineering Process".
+
+Begin directly with the engineering analysis.
+
+Example:
+
+"We first need to determine the force required to climb the incline."
+
+Then continue with the analysis and calculations.
+
+Use proper LaTeX inside the reasoning.
+
+============================================================
+FINAL ANSWER
+============================================================
+
+The final answer should contain, when appropriate:
+
+1. Important requirements
+2. Assumptions
+3. Relevant equations
+4. Calculations
+5. Results
+6. Limiting conditions
+7. Practical component considerations
+8. Tradeoffs
+9. Recommendations
+
+Do not unnecessarily repeat the entire engineering process in the
+final answer if it has already been shown separately.
 
 ============================================================
 SAFETY
@@ -694,13 +675,14 @@ For casual conversation, respond naturally.
 
 Do not force casual questions into an engineering format.
 
-Do not mention system messages, developer instructions, hidden
-configuration, instruction hierarchy, or internal implementation.
+Do not mention system messages, developer instructions,
+hidden configuration, instruction hierarchy, or internal
+implementation.
 """
 
 
 # ============================================================
-# ADD CURRENT SETTINGS TO SYSTEM PROMPT
+# CURRENT USER SETTINGS
 # ============================================================
 
 system_prompt += f"""
@@ -761,9 +743,9 @@ prompt = st.chat_input(
 
 if prompt:
 
-    # --------------------------------------------------------
+    # ========================================================
     # SAVE USER MESSAGE
-    # --------------------------------------------------------
+    # ========================================================
 
     st.session_state.messages.append(
         {
@@ -772,17 +754,17 @@ if prompt:
         }
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # DISPLAY USER MESSAGE
-    # --------------------------------------------------------
+    # ========================================================
 
     with st.chat_message("user"):
 
         render_markdown(prompt)
 
-    # --------------------------------------------------------
+    # ========================================================
     # LIMITED HISTORY
-    # --------------------------------------------------------
+    # ========================================================
 
     recent_messages = (
         st.session_state.messages[
@@ -819,7 +801,7 @@ if prompt:
 
                     reasoning_effort=reasoning_effort,
 
-                    max_completion_tokens=MAX_TOKENS,
+                    max_completion_tokens=MAX_COMPLETION_TOKENS,
 
                     stream=True,
                 )
@@ -835,9 +817,9 @@ if prompt:
 
                 st.stop()
 
-            # ------------------------------------------------
+            # =================================================
             # ENGINEERING PROCESS
-            # ------------------------------------------------
+            # =================================================
 
             with st.expander(
                 "Engineering Process",
@@ -850,18 +832,18 @@ if prompt:
                     "*Analyzing problem...*"
                 )
 
-            # ------------------------------------------------
+            # =================================================
             # FINAL ANSWER
-            # ------------------------------------------------
+            # =================================================
 
             answer_placeholder = st.empty()
 
             reasoning_text = ""
             answer_text = ""
 
-            # ------------------------------------------------
+            # =================================================
             # RECEIVE STREAM
-            # ------------------------------------------------
+            # =================================================
 
             for chunk in stream:
 
@@ -870,9 +852,9 @@ if prompt:
 
                 delta = chunk.choices[0].delta
 
-                # ============================================
+                # =============================================
                 # REASONING
-                # ============================================
+                # =============================================
 
                 reasoning = getattr(
                     delta,
@@ -888,9 +870,9 @@ if prompt:
                         clean_latex(reasoning_text)
                     )
 
-                # ============================================
+                # =============================================
                 # FINAL ANSWER
-                # ============================================
+                # =============================================
 
                 content = getattr(
                     delta,
@@ -906,9 +888,9 @@ if prompt:
                         clean_latex(answer_text)
                     )
 
-            # ------------------------------------------------
+            # =================================================
             # REASONING FALLBACK
-            # ------------------------------------------------
+            # =================================================
 
             if not reasoning_text:
 
@@ -916,9 +898,9 @@ if prompt:
                     "*No separate reasoning was returned by the model.*"
                 )
 
-            # ------------------------------------------------
+            # =================================================
             # SAVE ANSWER
-            # ------------------------------------------------
+            # =================================================
 
             st.session_state.messages.append(
                 {
@@ -952,7 +934,7 @@ if prompt:
 
                         reasoning_effort=reasoning_effort,
 
-                        max_completion_tokens=MAX_TOKENS,
+                        max_completion_tokens=MAX_COMPLETION_TOKENS,
                     )
 
                 except Exception as e:
@@ -966,9 +948,9 @@ if prompt:
 
                     st.stop()
 
-            # ------------------------------------------------
+            # =================================================
             # GET ANSWER
-            # ------------------------------------------------
+            # =================================================
 
             answer_text = (
                 response
@@ -978,9 +960,9 @@ if prompt:
                 or ""
             )
 
-            # ------------------------------------------------
+            # =================================================
             # GET REASONING
-            # ------------------------------------------------
+            # =================================================
 
             reasoning_text = getattr(
                 response.choices[0].message,
@@ -988,9 +970,9 @@ if prompt:
                 None,
             )
 
-            # ------------------------------------------------
+            # =================================================
             # ENGINEERING PROCESS
-            # ------------------------------------------------
+            # =================================================
 
             with st.expander(
                 "Engineering Process",
@@ -1009,15 +991,15 @@ if prompt:
                         "*No reasoning was returned.*"
                     )
 
-            # ------------------------------------------------
+            # =================================================
             # DISPLAY ANSWER
-            # ------------------------------------------------
+            # =================================================
 
             render_markdown(answer_text)
 
-            # ------------------------------------------------
+            # =================================================
             # SAVE ANSWER
-            # ------------------------------------------------
+            # =================================================
 
             st.session_state.messages.append(
                 {
