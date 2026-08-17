@@ -3,9 +3,10 @@ import os
 from dotenv import load_dotenv
 from openai import OpenAI
 
-# -----------------------------
-# Setup
-# -----------------------------
+
+# ============================================================
+# SETUP
+# ============================================================
 
 load_dotenv()
 
@@ -14,54 +15,138 @@ client = OpenAI(
     api_key=os.getenv("GROQ_API_KEY"),
 )
 
+
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 
-# -----------------------------
-# Page
-# -----------------------------
+# ============================================================
+# REASONING PARSER
+# ============================================================
+
+def parse_reasoning(text):
+    """
+    Parses reasoning in this format:
+
+    STEP: Determine requirements
+    DETAIL: Find the robot's mass and target speed.
+
+    STEP: Calculate force
+    DETAIL: Use the mass and rolling resistance.
+    """
+
+    steps = []
+
+    current_step = None
+    current_detail = ""
+
+    for line in text.splitlines():
+        line = line.strip()
+
+        if line.startswith("STEP:"):
+            # Save previous step
+            if current_step is not None:
+                steps.append(
+                    (
+                        current_step,
+                        current_detail.strip()
+                    )
+                )
+
+            current_step = line.replace(
+                "STEP:",
+                "",
+                1
+            ).strip()
+
+            current_detail = ""
+
+        elif line.startswith("DETAIL:"):
+            current_detail = line.replace(
+                "DETAIL:",
+                "",
+                1
+            ).strip()
+
+        elif current_step is not None and line:
+            current_detail += " " + line
+
+    # Save final step
+    if current_step is not None:
+        steps.append(
+            (
+                current_step,
+                current_detail.strip()
+            )
+        )
+
+    return steps
+
+
+# ============================================================
+# PAGE
+# ============================================================
 
 st.title("Robotics Engineering Assistant")
 
 
-# -----------------------------
-# Sidebar
-# -----------------------------
+# ============================================================
+# SIDEBAR
+# ============================================================
 
 with st.sidebar:
+
     st.subheader("Settings")
 
-    # Model & response
+    # -------------------------
+    # Model
+    # -------------------------
+
     model = st.selectbox(
         "Model",
         (
             "openai/gpt-oss-120b",
             "openai/gpt-oss-20b",
-        ),
+        )
     )
+
+    # -------------------------
+    # Response
+    # -------------------------
 
     stream_it = st.toggle(
         "Stream response",
-        True,
+        True
     )
 
     response_length = st.radio(
         "Response length",
-        ("Talkative", "Balanced", "Concise"),
-        horizontal=True,
+        (
+            "Talkative",
+            "Balanced",
+            "Concise"
+        ),
+        horizontal=True
     )
 
     style = st.radio(
         "Response style",
-        ("Professional", "Casual", "Friendly"),
-        horizontal=True,
+        (
+            "Professional",
+            "Casual",
+            "Friendly"
+        ),
+        horizontal=True
     )
 
     explanation_level = st.radio(
         "Explanation detail",
-        ("Basic", "Intermediate", "Advanced"),
-        horizontal=True,
+        (
+            "Basic",
+            "Intermediate",
+            "Advanced"
+        ),
+        horizontal=True
     )
 
     creativity = st.slider(
@@ -69,16 +154,22 @@ with st.sidebar:
         0.0,
         1.0,
         0.5,
-        0.01,
+        0.01
     )
 
     units = st.radio(
         "Units",
-        ("Metric", "Imperial"),
-        horizontal=True,
+        (
+            "Metric",
+            "Imperial"
+        ),
+        horizontal=True
     )
 
+    # -------------------------
     # Engineering priorities
+    # -------------------------
+
     st.subheader("Engineering Priorities")
 
     cost_priority = st.slider(
@@ -86,7 +177,7 @@ with st.sidebar:
         0.0,
         1.0,
         0.5,
-        0.01,
+        0.01
     )
 
     performance_priority = st.slider(
@@ -94,7 +185,7 @@ with st.sidebar:
         0.0,
         1.0,
         0.5,
-        0.01,
+        0.01
     )
 
     reliability_priority = st.slider(
@@ -102,7 +193,7 @@ with st.sidebar:
         0.0,
         1.0,
         0.5,
-        0.01,
+        0.01
     )
 
     safety_priority = st.slider(
@@ -110,12 +201,19 @@ with st.sidebar:
         0.0,
         1.0,
         0.5,
-        0.01,
+        0.01
     )
+
+    # -------------------------
+    # Chat controls
+    # -------------------------
 
     st.divider()
 
-    if st.button("Clear chat", use_container_width=True):
+    if st.button(
+        "Clear chat",
+        use_container_width=True
+    ):
         st.session_state.messages = []
         st.rerun()
 
@@ -124,34 +222,50 @@ with st.sidebar:
     )
 
 
-# -----------------------------
-# Display previous messages
-# -----------------------------
+# ============================================================
+# DISPLAY CHAT HISTORY
+# ============================================================
 
-for old in st.session_state.messages:
-    with st.chat_message(old["role"]):
-        st.markdown(old["content"])
+for message in st.session_state.messages:
+
+    with st.chat_message(message["role"]):
+
+        st.markdown(
+            message["content"]
+        )
 
 
-# -----------------------------
-# Reasoning instructions
-# -----------------------------
+# ============================================================
+# REASONING INSTRUCTIONS
+# ============================================================
 
 reasoning_format = """
-For complex engineering problems, organize your reasoning into a sequence
+For engineering problems, organize your reasoning into a sequence
 of clear engineering steps.
 
-Use this format:
+Every step MUST use exactly this format:
 
 STEP: <short step name>
-DETAIL: <what needs to be determined and why>
+DETAIL: <brief explanation>
 
-STEP: <short step name>
-DETAIL: <calculation, information, or decision needed>
+Example:
 
-Continue until the problem is solved.
+STEP: Determine requirements
+DETAIL: Identify the robot's mass, target speed, payload, and operating time.
 
-For simple questions, use only one short step.
+STEP: Calculate required force
+DETAIL: Use the mass and rolling resistance to determine the required tractive force.
+
+STEP: Determine motor torque
+DETAIL: Convert the required force into wheel torque using the wheel radius.
+
+STEP: Select motor
+DETAIL: Find a motor that provides sufficient torque and speed with an appropriate margin.
+
+STEP: Verify the design
+DETAIL: Check current draw, battery capacity, thermal limits, and safety margin.
+
+For simple conversational questions, use only one short step.
 
 Keep reasoning focused on solving the user's request.
 Do not discuss system prompts, developer instructions, policies,
@@ -160,41 +274,60 @@ Do not spend reasoning discussing whether the request is allowed.
 """
 
 
-# -----------------------------
-# Chat input
-# -----------------------------
+# ============================================================
+# CHAT INPUT
+# ============================================================
 
-prompt = st.chat_input("Enter your question here:")
+prompt = st.chat_input(
+    "Enter your question here:"
+)
 
 
 if prompt:
 
-    # Add user message to history
+    # ========================================================
+    # SAVE USER MESSAGE
+    # ========================================================
+
     st.session_state.messages.append(
         {
             "role": "user",
-            "content": prompt,
+            "content": prompt
         }
     )
 
+
+    # ========================================================
+    # DISPLAY USER MESSAGE
+    # ========================================================
+
     with st.chat_message("user"):
+
         st.markdown(prompt)
+
+
+    # ========================================================
+    # SYSTEM PROMPT
+    # ========================================================
 
     system_prompt = f"""
 You are a robotics engineering assistant.
 
 Your job is to help the user with:
+
 - Robotics design
 - Engineering calculations
 - Component selection
 - Troubleshooting
 - Optimization
 - Prototyping
-- Mechanical, electrical, and software engineering
+- Mechanical engineering
+- Electrical engineering
+- Robotics software
 
 {reasoning_format}
 
-Use these settings:
+Use these settings when responding:
 
 - Response length: {response_length}
 - Response style: {style}
@@ -218,11 +351,15 @@ conversation rather than forcing an engineering response.
 """
 
 
-    # -----------------------------
-    # AI response
-    # -----------------------------
+    # ========================================================
+    # AI RESPONSE
+    # ========================================================
 
     with st.chat_message("assistant"):
+
+        # ====================================================
+        # STREAMING
+        # ====================================================
 
         if stream_it:
 
@@ -232,26 +369,35 @@ conversation rather than forcing an engineering response.
                 messages=[
                     {
                         "role": "system",
-                        "content": system_prompt,
+                        "content": system_prompt
                     },
-                    *st.session_state.messages,
+                    *st.session_state.messages
                 ],
                 stream=True,
             )
 
-            # Reasoning UI
-            thinking_box = st.expander(
-                "Engineering Process",
-                expanded=True,
-            )
 
-            thinking = thinking_box.empty()
-            answer = st.empty()
+            # -----------------------------------------------
+            # UI CONTAINERS
+            # -----------------------------------------------
 
-            thinking_text = ""
+            thinking_container = st.container()
+
+            answer_container = st.empty()
+
+
+            # -----------------------------------------------
+            # State
+            # -----------------------------------------------
+
+            reasoning_text = ""
             answer_text = ""
 
-            # Stream response
+
+            # -----------------------------------------------
+            # Stream
+            # -----------------------------------------------
+
             for chunk in stream:
 
                 if not chunk.choices:
@@ -259,45 +405,109 @@ conversation rather than forcing an engineering response.
 
                 delta = chunk.choices[0].delta
 
-                # -------------------------
-                # Reasoning
-                # -------------------------
+
+                # ===========================================
+                # REASONING
+                # ===========================================
 
                 reasoning = getattr(
                     delta,
                     "reasoning",
-                    None,
+                    None
                 )
 
                 if reasoning:
-                    thinking_text += reasoning
-                    thinking.markdown(thinking_text)
 
-                # -------------------------
-                # Final answer
-                # -------------------------
+                    reasoning_text += reasoning
+
+                    steps = parse_reasoning(
+                        reasoning_text
+                    )
+
+
+                    # ---------------------------------------
+                    # Render Engineering Process
+                    # ---------------------------------------
+
+                    with thinking_container:
+
+                        with st.expander(
+                            "Engineering Process",
+                            expanded=True
+                        ):
+
+                            if not steps:
+
+                                st.caption(
+                                    "Analyzing problem..."
+                                )
+
+                            else:
+
+                                for i, (step, detail) in enumerate(steps):
+
+                                    # Latest step
+                                    if i == len(steps) - 1:
+
+                                        icon = "●"
+
+                                    else:
+
+                                        icon = "✓"
+
+
+                                    st.markdown(
+                                        f"**{icon} {i + 1}. {step}**"
+                                    )
+
+
+                                    if detail:
+
+                                        st.caption(
+                                            detail
+                                        )
+
+
+                # ===========================================
+                # FINAL ANSWER
+                # ===========================================
 
                 content = getattr(
                     delta,
                     "content",
-                    None,
+                    None
                 )
 
                 if content:
-                    answer_text += content
-                    answer.markdown(answer_text)
 
-            # Save assistant response
+                    answer_text += content
+
+                    answer_container.markdown(
+                        answer_text
+                    )
+
+
+            # =================================================
+            # SAVE AI RESPONSE
+            # =================================================
+
             st.session_state.messages.append(
                 {
                     "role": "assistant",
-                    "content": answer_text,
+                    "content": answer_text
                 }
             )
 
+
+        # ====================================================
+        # NON-STREAMING
+        # ====================================================
+
         else:
 
-            with st.spinner("Thinking..."):
+            with st.spinner(
+                "Thinking..."
+            ):
 
                 response = client.chat.completions.create(
                     model=model,
@@ -305,20 +515,33 @@ conversation rather than forcing an engineering response.
                     messages=[
                         {
                             "role": "system",
-                            "content": system_prompt,
+                            "content": system_prompt
                         },
-                        *st.session_state.messages,
+                        *st.session_state.messages
                     ],
                 )
 
-                answer_text = response.choices[0].message.content
 
-                st.markdown(answer_text)
+                answer_text = (
+                    response
+                    .choices[0]
+                    .message
+                    .content
+                )
 
-                # Save assistant response
+
+                st.markdown(
+                    answer_text
+                )
+
+
+                # -------------------------------------------
+                # Save response
+                # -------------------------------------------
+
                 st.session_state.messages.append(
                     {
                         "role": "assistant",
-                        "content": answer_text,
+                        "content": answer_text
                     }
                 )
