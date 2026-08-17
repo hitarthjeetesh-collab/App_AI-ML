@@ -1,29 +1,6 @@
-import streamlit as st
 import os
-
-from dotenv import load_dotenv
+import streamlit as st
 from openai import OpenAI
-
-
-# ============================================================
-# CONFIGURATION
-# ============================================================
-
-load_dotenv()
-
-client = OpenAI(
-    base_url="https://api.groq.com/openai/v1",
-    api_key=os.getenv("GROQ_API_KEY"),
-)
-
-
-# ============================================================
-# SESSION STATE
-# ============================================================
-
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
 
 # ============================================================
 # PAGE CONFIG
@@ -35,686 +12,289 @@ st.set_page_config(
     layout="wide",
 )
 
+# ============================================================
+# CONFIG
+# ============================================================
+
+MODEL = os.getenv("OPENAI_MODEL", "gpt-5.6")
+
+SYSTEM_PROMPT = r"""
+# Robotics Engineering Assistant
+
+You are a Robotics Engineering AI assistant.
+
+Your purpose is to help users design, analyze, troubleshoot, and improve
+robotics systems using engineering principles.
+
+You should reason through engineering problems systematically.
+
+## Engineering Process
+
+When solving an engineering design problem, structure the response around:
+
+1. Important requirements
+2. Missing information
+3. Explicit assumptions
+4. Governing equations
+5. Calculations
+6. Results
+7. Limiting conditions
+8. Practical component considerations
+9. Trade-offs
+10. Design recommendations
+
+## Mathematical formatting
+
+IMPORTANT:
+
+Use proper LaTeX for mathematical equations.
+
+Use:
+
+- Inline math: \( ... \)
+- Display equations: \[ ... \]
+
+For multi-line equations, use:
+
+\[
+\begin{aligned}
+F_{\text{grade}} &= mg\sin(\theta) \\
+F_{\text{rr}} &= C_{\text{rr}}mg\cos(\theta)
+\end{aligned}
+\]
+
+Do NOT write raw LaTeX-looking text such as:
+
+[ F_{total}=... ]
+
+Do NOT remove LaTeX backslashes.
+
+Do NOT put LaTeX equations inside Markdown code blocks.
+
+Use Markdown tables where appropriate.
+
+## Engineering rigor
+
+Clearly distinguish between:
+
+- calculated values
+- assumptions
+- estimates
+- component recommendations
+
+Check units.
+
+Do not invent precise component specifications when they are unknown.
+
+If a parameter significantly affects the result, explain how.
+
+When comparing multiple engineering options, provide the pros and cons of each.
+
+For motors, distinguish between:
+
+- motor torque
+- gearbox output torque
+- wheel torque
+- mechanical power
+- electrical input power
+
+For batteries, distinguish between:
+
+- nominal voltage
+- Ah capacity
+- Wh energy
+- usable energy
+- battery efficiency
+- reserve capacity
+
+Do not assume that a motor's advertised peak torque is its continuous torque.
+
+## Robotics-specific considerations
+
+Consider when relevant:
+
+- acceleration
+- grade resistance
+- rolling resistance
+- aerodynamic drag
+- drivetrain efficiency
+- motor efficiency
+- gearbox ratio
+- wheel radius
+- traction
+- thermal limits
+- battery discharge rate
+- center of gravity
+- weight distribution
+- braking
+- safety margin
+
+Do not blindly accept the user's calculations. Check them independently.
+
+## Response style
+
+Be technically detailed but readable.
+
+Use headings, equations, tables, and bullet points.
+
+Do not expose hidden chain-of-thought or private reasoning.
+Instead, provide concise engineering calculations and explanations.
+"""
 
 # ============================================================
-# PAGE
+# OPENAI CLIENT
 # ============================================================
 
-st.title("Robotics Engineering Assistant")
+api_key = os.getenv("OPENAI_API_KEY")
 
+if not api_key:
+    st.error(
+        "OPENAI_API_KEY is not configured. "
+        "Set it as an environment variable before running the app."
+    )
+    st.stop()
+
+client = OpenAI(api_key=api_key)
+
+# ============================================================
+# SESSION STATE
+# ============================================================
+
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
 # ============================================================
 # SIDEBAR
 # ============================================================
 
 with st.sidebar:
+    st.title("🤖 Robotics Engineering Assistant")
 
-    st.subheader("Settings")
+    st.markdown(
+        """
+        **Purpose**
 
-    # --------------------------------------------------------
-    # MODEL
-    # --------------------------------------------------------
+        An AI engineering assistant specialized in robotics.
 
-    model = st.selectbox(
-        "Model",
-        (
-            "openai/gpt-oss-120b",
-            "openai/gpt-oss-20b",
-        ),
+        **Capabilities**
+
+        - Mechanical design
+        - Motor sizing
+        - Battery sizing
+        - Power calculations
+        - Control systems
+        - Sensors
+        - Embedded systems
+        - Robotics software
+        - Engineering trade-offs
+        """
     )
 
-    # --------------------------------------------------------
-    # STREAMING
-    # --------------------------------------------------------
+    st.divider()
 
-    stream_it = st.toggle(
-        "Stream response",
-        value=True,
-    )
-
-    # --------------------------------------------------------
-    # RESPONSE LENGTH
-    # --------------------------------------------------------
-
-    response_length = st.radio(
-        "Response length",
-        (
-            "Talkative",
-            "Balanced",
-            "Concise",
-        ),
-        horizontal=True,
-    )
-
-    # --------------------------------------------------------
-    # RESPONSE STYLE
-    # --------------------------------------------------------
-
-    style = st.radio(
-        "Response style",
-        (
-            "Professional",
-            "Casual",
-            "Friendly",
-        ),
-        horizontal=True,
-    )
-
-    # --------------------------------------------------------
-    # EXPLANATION LEVEL
-    # --------------------------------------------------------
-
-    explanation_level = st.radio(
-        "Explanation detail",
-        (
-            "Basic",
-            "Intermediate",
-            "Advanced",
-        ),
-        horizontal=True,
-    )
-
-    # --------------------------------------------------------
-    # CREATIVITY
-    # --------------------------------------------------------
-
-    creativity = st.slider(
-        "Creativity",
-        min_value=0.0,
-        max_value=1.0,
-        value=0.5,
-        step=0.01,
-    )
-
-    # --------------------------------------------------------
-    # UNITS
-    # --------------------------------------------------------
-
-    units = st.radio(
-        "Units",
-        (
-            "Metric",
-            "Imperial",
-        ),
-        horizontal=True,
-    )
-
-    # ========================================================
-    # ENGINEERING PRIORITIES
-    # ========================================================
-
-    st.subheader("Engineering Priorities")
-
-    cost_priority = st.slider(
-        "Cost",
-        0.0,
-        1.0,
-        0.5,
-        0.01,
-    )
-
-    performance_priority = st.slider(
-        "Performance",
-        0.0,
-        1.0,
-        0.5,
-        0.01,
-    )
-
-    reliability_priority = st.slider(
-        "Reliability",
-        0.0,
-        1.0,
-        0.5,
-        0.01,
-    )
-
-    safety_priority = st.slider(
-        "Safety",
-        0.0,
-        1.0,
-        0.5,
-        0.01,
-    )
-
-    # ========================================================
-    # REASONING
-    # ========================================================
-
-    st.subheader("Reasoning")
-
-    reasoning_effort = st.selectbox(
-        "Reasoning effort",
-        (
-            "low",
-            "medium",
-            "high",
-        ),
-        index=1,
-    )
-
-    # ========================================================
-    # CLEAR CHAT
-    # ========================================================
-
-    if st.button(
-        "Clear chat",
-        use_container_width=True,
-    ):
+    if st.button("Clear conversation", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
 
-    # --------------------------------------------------------
-    # CHAT COUNT
-    # --------------------------------------------------------
-
-    st.caption(
-        f"{len(st.session_state.messages)} messages in this chat"
-    )
-
-
 # ============================================================
-# SYSTEM PROMPT
+# TITLE
 # ============================================================
 
-system_prompt = f"""
-You are a Robotics Engineering Assistant.
-
-Your job is to help the user with robotics engineering, including:
-
-- Mechanical design
-- Electrical design
-- Motors and actuators
-- Batteries and power systems
-- Sensors
-- Control systems
-- Embedded systems
-- Calculations
-- Component selection
-- Troubleshooting
-- Optimization
-- Prototyping
-- Engineering tradeoffs
-
-RESPONSE SETTINGS:
-
-Response length: {response_length}
-Response style: {style}
-Explanation level: {explanation_level}
-Creativity: {creativity}
-Units: {units}
-
-ENGINEERING PRIORITIES:
-
-Cost priority: {cost_priority}
-Performance priority: {performance_priority}
-Reliability priority: {reliability_priority}
-Safety priority: {safety_priority}
-
-
-============================================================
-ENGINEERING BEHAVIOR
-============================================================
-
-For engineering problems:
-
-1. Identify the important requirements.
-2. Identify missing information.
-3. State reasonable assumptions.
-4. Determine the governing equations or engineering principles.
-5. Perform the important calculations.
-6. Identify limiting conditions.
-7. Consider practical component constraints.
-8. Explain important tradeoffs.
-9. Give clear design recommendations.
-10. Distinguish estimates from known specifications.
-
-Do not blindly accept assumptions if they produce an unrealistic design.
-
-For simple questions, answer directly without unnecessary detail.
-
-For complex engineering questions, reason through the problem carefully
-before producing the final answer.
-
-
-============================================================
-MATHEMATICAL FORMATTING
-============================================================
-
-You MAY and SHOULD use LaTeX for mathematical equations.
-
-The application renders Markdown with Streamlit.
-
-Use valid Markdown-compatible LaTeX.
-
-For inline equations, use:
-
-$F = ma$
-
-For important equations on their own line, use:
-
-$$
-F = ma
-$$
-
-Use LaTeX for engineering calculations when it improves readability.
-
-Examples include:
-
-$$
-F_{{grade}} = mg\\sin(\\theta)
-$$
-
-$$
-F_{{rr}} = C_{{rr}}mg\\cos(\\theta)
-$$
-
-$$
-F_{{total}} = F_{{grade}} + F_{{rr}}
-$$
-
-$$
-T_{{wheel}} = F_{{wheel}}r
-$$
-
-$$
-P = Fv
-$$
-
-$$
-E = Pt
-$$
-
-For fractions, use:
-
-$$
-C = \\frac{{E}}{{V}}
-$$
-
-For multi-step calculations, format them clearly:
-
-$$
-F_{{grade}}
-=
-25 \\times 9.81 \\times \\sin(10^\\circ)
-$$
-
-$$
-F_{{grade}} \\approx 42.6\\ \\text{{N}}
-$$
-
-IMPORTANT:
-
-Never write a LaTeX equation inside square brackets.
-
-BAD:
-
-[ F_{{total}} = F_{{grade}} + F_{{rr}} ]
-
-GOOD:
-
-$$
-F_{{total}} = F_{{grade}} + F_{{rr}}
-$$
-
-Do not output malformed LaTeX.
-
-Use Markdown headings, bullet lists, and tables normally.
-
-Do not unnecessarily use equations for simple numerical answers.
-
-
-============================================================
-ENGINEERING PROCESS
-============================================================
-
-When solving a substantial engineering problem, carefully reason through
-the engineering process.
-
-The application displays the model's reasoning separately inside an
-"Engineering Process" box.
-
-Do NOT write the heading "Engineering Process" yourself.
-
-Begin the reasoning directly with the analysis.
-
-For example:
-
-"We first need to determine the force required to climb the incline."
-
-Then continue with calculations and reasoning.
-
-Use LaTeX normally inside the reasoning when appropriate.
-
-
-============================================================
-FINAL ANSWER
-============================================================
-
-The final answer should contain:
-
-1. Important requirements
-2. Assumptions
-3. Relevant equations
-4. Calculations
-5. Results
-6. Limiting conditions
-7. Practical component considerations
-8. Tradeoffs
-9. Recommendations
-
-Clearly distinguish calculated values from assumptions.
-
-For engineering calculations, show enough work that the user can verify
-the result.
-
-
-============================================================
-SAFETY
-============================================================
-
-Clearly identify important engineering safety considerations.
-
-Do not claim that an estimate is a guaranteed specification.
-
-Distinguish between:
-
-- calculated requirements
-- assumed values
-- recommended ratings
-- manufacturer specifications
-
-
-============================================================
-CASUAL QUESTIONS
-============================================================
-
-For casual conversation, respond naturally.
-
-Do not force casual questions into an engineering format.
-
-Do not mention system messages, developer instructions, hidden
-configuration, instruction hierarchy, or internal implementation.
-"""
-
+st.title("Robotics Engineering Assistant")
+
+st.caption(
+    "Design, calculate, troubleshoot, and optimize robotics systems."
+)
 
 # ============================================================
-# DISPLAY PREVIOUS CHAT
+# DISPLAY PREVIOUS MESSAGES
 # ============================================================
 
 for message in st.session_state.messages:
-
     with st.chat_message(message["role"]):
-
-        st.markdown(
-            message["content"]
-        )
-
+        st.markdown(message["content"])
 
 # ============================================================
 # CHAT INPUT
 # ============================================================
 
-prompt = st.chat_input(
-    "Enter your question here:"
+user_input = st.chat_input(
+    "Describe your robotics engineering problem..."
 )
 
-
-# ============================================================
-# NEW MESSAGE
-# ============================================================
-
-if prompt:
+if user_input:
 
     # --------------------------------------------------------
-    # ADD USER MESSAGE
+    # Add user message
     # --------------------------------------------------------
 
     st.session_state.messages.append(
         {
             "role": "user",
-            "content": prompt,
+            "content": user_input,
         }
     )
 
-    # --------------------------------------------------------
-    # DISPLAY USER MESSAGE
-    # --------------------------------------------------------
-
     with st.chat_message("user"):
-
-        st.markdown(prompt)
+        st.markdown(user_input)
 
     # --------------------------------------------------------
-    # AI MESSAGE
+    # Build API messages
+    # --------------------------------------------------------
+
+    api_messages = [
+        {
+            "role": "system",
+            "content": SYSTEM_PROMPT,
+        }
+    ]
+
+    api_messages.extend(st.session_state.messages)
+
+    # --------------------------------------------------------
+    # Generate response
     # --------------------------------------------------------
 
     with st.chat_message("assistant"):
 
-        # ====================================================
-        # STREAMING
-        # ====================================================
+        response_placeholder = st.empty()
 
-        if stream_it:
+        try:
+            response = client.chat.completions.create(
+                model=MODEL,
+                messages=api_messages,
+            )
 
-            try:
+            answer = response.choices[0].message.content
 
-                stream = client.chat.completions.create(
-                    model=model,
+            if not answer:
+                answer = "The model returned an empty response."
 
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": system_prompt,
-                        },
-                        *st.session_state.messages,
-                    ],
-
-                    temperature=creativity,
-
-                    reasoning_effort=reasoning_effort,
-
-                    stream=True,
-                )
-
-            except Exception as e:
-
-                st.error(
-                    f"API request failed: {type(e).__name__}: {e}"
-                )
-
-                st.stop()
-
+            response_placeholder.markdown(answer)
 
             # ------------------------------------------------
-            # ENGINEERING PROCESS
-            # ------------------------------------------------
-
-            with st.expander(
-                "Engineering Process",
-                expanded=True,
-            ):
-
-                thinking_placeholder = st.empty()
-
-                thinking_placeholder.markdown(
-                    "*Analyzing problem...*"
-                )
-
-
-            # ------------------------------------------------
-            # FINAL ANSWER
-            # ------------------------------------------------
-
-            answer_placeholder = st.empty()
-
-
-            # ------------------------------------------------
-            # TEXT STORAGE
-            # ------------------------------------------------
-
-            reasoning_text = ""
-            answer_text = ""
-
-
-            # ------------------------------------------------
-            # RECEIVE STREAM
-            # ------------------------------------------------
-
-            for chunk in stream:
-
-                if not chunk.choices:
-                    continue
-
-                delta = chunk.choices[0].delta
-
-
-                # ============================================
-                # REASONING
-                # ============================================
-
-                reasoning = getattr(
-                    delta,
-                    "reasoning",
-                    None,
-                )
-
-                if reasoning:
-
-                    reasoning_text += reasoning
-
-                    thinking_placeholder.markdown(
-                        reasoning_text
-                    )
-
-
-                # ============================================
-                # FINAL ANSWER
-                # ============================================
-
-                content = getattr(
-                    delta,
-                    "content",
-                    None,
-                )
-
-                if content:
-
-                    answer_text += content
-
-                    answer_placeholder.markdown(
-                        answer_text
-                    )
-
-
-            # ------------------------------------------------
-            # SAVE FINAL ANSWER
+            # Save assistant response
             # ------------------------------------------------
 
             st.session_state.messages.append(
                 {
                     "role": "assistant",
-                    "content": answer_text,
+                    "content": answer,
                 }
             )
 
+        except Exception as e:
 
-        # ====================================================
-        # NON-STREAMING
-        # ====================================================
-
-        else:
-
-            with st.spinner("Thinking..."):
-
-                try:
-
-                    response = client.chat.completions.create(
-                        model=model,
-
-                        messages=[
-                            {
-                                "role": "system",
-                                "content": system_prompt,
-                            },
-                            *st.session_state.messages,
-                        ],
-
-                        temperature=creativity,
-
-                        reasoning_effort=reasoning_effort,
-                    )
-
-                except Exception as e:
-
-                    st.error(
-                        f"API request failed: {type(e).__name__}: {e}"
-                    )
-
-                    st.stop()
-
-
-            # ------------------------------------------------
-            # GET ANSWER
-            # ------------------------------------------------
-
-            answer_text = (
-                response
-                .choices[0]
-                .message
-                .content
+            error_message = (
+                "### API Error\n\n"
+                f"`{type(e).__name__}: {e}`"
             )
 
+            response_placeholder.markdown(error_message)
 
-            # ------------------------------------------------
-            # GET REASONING
-            # ------------------------------------------------
-
-            reasoning_text = getattr(
-                response.choices[0].message,
-                "reasoning",
-                None,
-            )
-
-
-            # ------------------------------------------------
-            # ENGINEERING PROCESS
-            # ------------------------------------------------
-
-            with st.expander(
-                "Engineering Process",
-                expanded=False,
+            # Remove the user message if the request failed
+            if (
+                st.session_state.messages
+                and st.session_state.messages[-1]["role"] == "user"
             ):
-
-                if reasoning_text:
-
-                    st.markdown(
-                        reasoning_text
-                    )
-
-                else:
-
-                    st.markdown(
-                        "*No reasoning was returned.*"
-                    )
-
-
-            # ------------------------------------------------
-            # SHOW ANSWER
-            # ------------------------------------------------
-
-            st.markdown(
-                answer_text
-            )
-
-
-            # ------------------------------------------------
-            # SAVE ANSWER
-            # ------------------------------------------------
-
-            st.session_state.messages.append(
-                {
-                    "role": "assistant",
-                    "content": answer_text,
-                }
-            )
+                st.session_state.messages.pop()
