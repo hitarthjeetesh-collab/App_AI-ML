@@ -620,6 +620,50 @@ Use LaTeX commands such as:
 
 
 ============================================================
+LATEX SIMPLICITY RULE
+============================================================
+
+Prefer SIMPLE LaTeX over complex LaTeX.
+
+For most calculations, use separate display equations:
+
+$$
+F_g = mg\sin(\theta)
+$$
+
+$$
+F_g = 25 \times 9.81 \times \sin(10^\circ)
+\approx 42.6\ \text{N}
+$$
+
+Only use the aligned environment when multiple equations
+genuinely need to be vertically aligned.
+
+When using aligned, ALWAYS use exactly this structure:
+
+$$
+\begin{aligned}
+F_g &= mg\sin(\theta) \\
+F_{rr} &= C_{rr}mg\cos(\theta) \\
+F_{total} &= F_g + F_{rr}
+\end{aligned}
+$$
+
+NEVER generate:
+
+\begin{aligned} ... \$$4pt] ... \end{aligned}
+
+NEVER generate:
+
+[ equation ]
+
+NEVER generate raw LaTeX outside a math delimiter.
+
+Do not use [4pt] spacing unless it is actually needed.
+Prefer normal line breaks with \\ inside aligned.
+
+
+============================================================
 VERY IMPORTANT LATEX RULES
 ============================================================
 
