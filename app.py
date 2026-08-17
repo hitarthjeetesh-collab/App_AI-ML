@@ -17,7 +17,7 @@ client = OpenAI(
     api_key=os.getenv("GROQ_API_KEY"),
 )
 
-max_tokens = 6000
+max_tokens = 7000
 
 
 # ============================================================
