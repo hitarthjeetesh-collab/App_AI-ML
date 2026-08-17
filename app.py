@@ -1,6 +1,7 @@
 import os
 import re
 import time
+from datetime import datetime, timedelta
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -24,45 +25,44 @@ client = OpenAI(
 # ============================================================
 
 MAX_COMPLETION_TOKENS = 3000
-
-# Only recent conversation is sent normally.
 MAX_HISTORY_MESSAGES = 4
-
-# Engineering memory is kept separately and compact.
 MAX_ENGINEERING_MEMORY_CHARS = 3000
 
 
 # ============================================================
-# MODEL ROUTING
+# MODEL CONFIGURATION
+# ============================================================
+#
+# IMPORTANT:
+# We do NOT use service_tier="auto".
+#
+# Model selection is handled locally so a simple question does
+# not consume the expensive 120B model.
+#
+# Priority:
+#
+# SIMPLE
+#   -> 20B
+#
+# MEDIUM
+#   -> Qwen 27B
+#
+# COMPLEX
+#   -> 120B
+#
+# If the selected model is rate-limited, the program automatically
+# tries the other models before giving up.
 # ============================================================
 
-MODEL_SIMPLE = "openai/gpt-oss-20b"
+MODEL_CHEAP = "openai/gpt-oss-20b"
 MODEL_MEDIUM = "qwen/qwen3.6-27b"
-MODEL_COMPLEX = "openai/gpt-oss-120b"
+MODEL_POWERFUL = "openai/gpt-oss-120b"
 
-MODEL_NAMES = {
-    MODEL_SIMPLE: "GPT-OSS 20B",
-    MODEL_MEDIUM: "Qwen 3.6 27B",
-    MODEL_COMPLEX: "GPT-OSS 120B",
-    "groq/compound-mini": "Compound Mini",
-}
-
-MODEL_PRIORITY = [
-    MODEL_SIMPLE,
+MODEL_ORDER = [
+    MODEL_CHEAP,
     MODEL_MEDIUM,
-    MODEL_COMPLEX,
+    MODEL_POWERFUL,
 ]
-
-
-# ============================================================
-# PAGE CONFIG
-# ============================================================
-
-st.set_page_config(
-    page_title="Robotics Engineering Assistant",
-    page_icon="🤖",
-    layout="wide",
-)
 
 
 # ============================================================
@@ -78,78 +78,85 @@ if "engineering_memory" not in st.session_state:
 if "model_cooldowns" not in st.session_state:
     st.session_state.model_cooldowns = {}
 
+if "model_limit_types" not in st.session_state:
+    st.session_state.model_limit_types = {}
+
 if "last_model_used" not in st.session_state:
     st.session_state.last_model_used = None
 
-if "last_routing_level" not in st.session_state:
-    st.session_state.last_routing_level = None
-
 
 # ============================================================
-# RATE LIMIT DETECTION
+# RATE LIMIT HANDLING
 # ============================================================
 
 def get_rate_limit_type(error):
     """
-    Detect the type of provider limit that caused the error.
+    Determine what kind of Groq rate-limit error occurred.
     """
 
-    text = str(error).lower()
+    error_text = str(error).lower()
 
     if (
-        "tokens per day" in text
-        or "tokens/day" in text
-        or "tpd" in text
-    ):
-        return "TPD"
-
-    if (
-        "requests per day" in text
-        or "requests/day" in text
-        or "rpd" in text
-    ):
-        return "RPD"
-
-    if (
-        "tokens per minute" in text
-        or "tokens/minute" in text
-        or "tpm" in text
+        "tokens per minute" in error_text
+        or "tpm" in error_text
+        or "tokens/minute" in error_text
     ):
         return "TPM"
 
     if (
-        "requests per minute" in text
-        or "requests/minute" in text
-        or "rpm" in text
+        "requests per minute" in error_text
+        or "rpm" in error_text
+        or "requests/minute" in error_text
     ):
         return "RPM"
 
-    if "rate_limit_exceeded" in text:
-        return "RATE"
+    if (
+        "daily" in error_text
+        or "per day" in error_text
+        or "tokens per day" in error_text
+        or "requests per day" in error_text
+    ):
+        return "DAILY"
 
-    if "429" in text:
+    if (
+        "rate_limit_exceeded" in error_text
+        or "rate limit" in error_text
+        or "429" in error_text
+    ):
         return "RATE"
 
     return None
 
 
+def is_rate_limit_error(error):
+    """
+    Return True if the error appears to be a rate-limit error.
+    """
+
+    if get_rate_limit_type(error):
+        return True
+
+    error_text = str(error).lower()
+
+    return (
+        "rate_limit_exceeded" in error_text
+        or "too many requests" in error_text
+        or "429" in error_text
+    )
+
+
 def get_retry_seconds(error):
     """
-    Attempt to extract the provider's retry time.
+    Try to extract a retry duration from the provider error.
     """
 
-    text = str(error)
+    error_text = str(error)
 
     patterns = [
-
         r"try again in\s*(\d+(?:\.\d+)?)\s*s",
-
         r"try again in\s*(\d+(?:\.\d+)?)\s*seconds?",
-
         r"retry after\s*(\d+(?:\.\d+)?)\s*seconds?",
-
         r"retry[- ]after[:\s]+(\d+(?:\.\d+)?)",
-
         r"in\s*(\d+(?:\.\d+)?)\s*seconds?",
     ]
 
@@ -157,14 +164,13 @@ def get_retry_seconds(error):
 
         match = re.search(
             pattern,
-            text,
+            error_text,
             flags=re.IGNORECASE,
         )
 
         if match:
 
             try:
-
                 return max(
                     1,
                     int(float(match.group(1))),
@@ -176,13 +182,12 @@ def get_retry_seconds(error):
     return None
 
 
-def mark_model_limited(model, error):
+def set_model_cooldown(model, error):
     """
-    Temporarily mark a model as unavailable.
+    Put a model into a temporary cooldown after a rate limit.
     """
 
     limit_type = get_rate_limit_type(error)
-
     retry_seconds = get_retry_seconds(error)
 
     if retry_seconds is not None:
@@ -193,423 +198,433 @@ def mark_model_limited(model, error):
 
         cooldown = 60
 
-    elif limit_type in ("TPD", "RPD"):
+    elif limit_type == "DAILY":
 
-        cooldown = 3600
+        # We do not know the provider's exact reset time.
+        # Keep this model unavailable for the rest of the day.
+        now = datetime.now()
+
+        tomorrow = (
+            now + timedelta(days=1)
+        ).replace(
+            hour=0,
+            minute=0,
+            second=5,
+            microsecond=0,
+        )
+
+        cooldown = max(
+            60,
+            int(
+                (
+                    tomorrow - now
+                ).total_seconds()
+            ),
+        )
 
     else:
 
         cooldown = 60
 
-    st.session_state.model_cooldowns[model] = {
-        "until": time.time() + cooldown,
-        "type": limit_type or "RATE",
-    }
-
-    return (
-        limit_type or "RATE",
-        cooldown,
+    st.session_state.model_cooldowns[model] = (
+        time.time() + cooldown
     )
 
+    st.session_state.model_limit_types[model] = (
+        limit_type or "RATE"
+    )
 
-def mark_model_temporarily_unavailable(
-    model,
-    seconds=30,
-):
+    return cooldown
+
+
+def get_model_remaining(model):
     """
-    Temporarily disable a model for transient
-    provider/server failures.
-    """
-
-    st.session_state.model_cooldowns[model] = {
-        "until": time.time() + seconds,
-        "type": "TEMPORARY",
-    }
-
-
-def model_is_available(model):
-    """
-    Return True if the model can currently be used.
+    Return remaining cooldown seconds for a model.
     """
 
-    info = st.session_state.model_cooldowns.get(model)
-
-    if not info:
-        return True
-
-    if time.time() >= info["until"]:
-
-        del st.session_state.model_cooldowns[model]
-
-        return True
-
-    return False
-
-
-def get_model_remaining_seconds(model):
-    """
-    Return remaining cooldown time.
-    """
-
-    info = st.session_state.model_cooldowns.get(model)
-
-    if not info:
-        return 0
-
-    return max(
+    until = st.session_state.model_cooldowns.get(
+        model,
         0,
-        int(info["until"] - time.time()),
     )
 
+    remaining = max(
+        0,
+        int(until - time.time()),
+    )
 
-def format_wait(seconds):
-    """
-    Convert seconds into a readable duration.
-    """
+    if remaining <= 0:
 
-    seconds = max(0, int(seconds))
-
-    if seconds >= 86400:
-
-        days = seconds // 86400
-
-        hours = (
-            seconds % 86400
-        ) // 3600
-
-        return f"{days}d {hours}h"
-
-    if seconds >= 3600:
-
-        hours = seconds // 3600
-
-        minutes = (
-            seconds % 3600
-        ) // 60
-
-        return f"{hours}h {minutes}m"
-
-    if seconds >= 60:
-
-        minutes = seconds // 60
-
-        remaining_seconds = (
-            seconds % 60
+        st.session_state.model_cooldowns.pop(
+            model,
+            None,
         )
 
-        return (
-            f"{minutes}m "
-            f"{remaining_seconds:02d}s"
+        st.session_state.model_limit_types.pop(
+            model,
+            None,
         )
 
-    return f"{seconds}s"
+    return remaining
+
+
+def is_model_available(model):
+    return get_model_remaining(model) <= 0
+
+
+def get_available_models():
+    """
+    Return models that are not currently rate-limited.
+    """
+
+    return [
+        model
+        for model in MODEL_ORDER
+        if is_model_available(model)
+    ]
 
 
 # ============================================================
-# QUESTION COMPLEXITY ROUTER
+# AUTOMATIC MODEL SELECTION
 # ============================================================
 
-def classify_question(
-    prompt,
-    memory="",
-    history=None,
-):
+def classify_question(prompt):
     """
-    Determine the appropriate model WITHOUT making
-    another API request.
+    Decide how much model capability the question needs.
 
-    Returns:
+    This is deliberately LOCAL.
 
-        SIMPLE
-        MEDIUM
-        COMPLEX
+    No API call is made just to decide which model to use.
+    That means simple questions do not waste tokens or money.
     """
 
     text = prompt.lower().strip()
 
-    score = 0
-
     # --------------------------------------------------------
-    # SIMPLE QUESTION INDICATORS
+    # Very simple questions
     # --------------------------------------------------------
 
-    simple_phrases = [
+    simple_patterns = [
+        r"^what is\b",
+        r"^what's\b",
+        r"^who is\b",
+        r"^what does\b",
+        r"^define\b",
+        r"^meaning of\b",
+        r"^explain\b",
+        r"^how do i\b",
+        r"^how to\b",
+        r"^why is\b",
+        r"^why does\b",
+        r"^is .+ better than .+$",
+        r"^.+ vs .+$",
+        r"^compare .+$",
+    ]
+
+    simple_keywords = [
         "what is",
-        "what are",
-        "what does",
+        "what's",
         "define",
-        "meaning of",
+        "meaning",
+        "how do i",
+        "how to",
+        "why is",
         "why does",
-        "why do",
-        "how does",
-        "difference between",
-        "convert",
-        "how many",
-        "what means",
     ]
 
-    for phrase in simple_phrases:
-
-        if phrase in text:
-
-            score -= 2
-
     # --------------------------------------------------------
-    # BASIC ENGINEERING
+    # Complex engineering indicators
     # --------------------------------------------------------
 
-    basic_engineering = [
-        "rpm",
-        "voltage",
-        "current",
-        "ohm",
-        "amp",
-        "watt",
-        "newton",
-        "torque",
-        "power",
-        "force",
-        "energy",
-        "battery",
-        "motor",
-        "sensor",
-        "imu",
-        "encoder",
-        "can bus",
-        "gearbox",
-        "gear ratio",
-    ]
-
-    for word in basic_engineering:
-
-        if word in text:
-
-            score += 1
-
-    # --------------------------------------------------------
-    # CALCULATION
-    # --------------------------------------------------------
-
-    calculation_words = [
+    complex_keywords = [
+        "design",
         "calculate",
         "calculation",
-        "compute",
-        "solve",
         "equation",
-        "how much",
-        "how many",
-        "required",
-        "requirement",
+        "derive",
+        "dimension",
         "sizing",
         "size",
-    ]
-
-    for word in calculation_words:
-
-        if word in text:
-
-            score += 1
-
-    # --------------------------------------------------------
-    # DESIGN
-    # --------------------------------------------------------
-
-    design_words = [
-        "design",
-        "build",
-        "choose",
-        "select",
-        "recommend",
-        "designing",
-        "architecture",
-        "drivetrain",
-        "powertrain",
-        "system",
-        "prototype",
-        "component selection",
-    ]
-
-    for word in design_words:
-
-        if word in text:
-
-            score += 2
-
-    # --------------------------------------------------------
-    # COMPLEX ENGINEERING
-    # --------------------------------------------------------
-
-    complex_words = [
         "optimize",
         "optimization",
-        "analyze",
-        "analysis",
-        "compare",
-        "tradeoff",
-        "trade-off",
-        "constraints",
-        "multiple",
-        "several",
-        "complete",
-        "entire",
-        "full system",
-        "architecture",
+        "motor",
+        "torque",
+        "power",
+        "battery",
+        "bms",
+        "gearbox",
+        "drivetrain",
+        "actuator",
+        "robot",
+        "robotics",
+        "kinematics",
+        "dynamics",
+        "control",
+        "pid",
+        "trajectory",
         "simulation",
-        "thermal analysis",
-        "efficiency analysis",
-        "failure analysis",
+        "thermal",
+        "heat",
+        "stress",
+        "strain",
+        "load",
+        "force",
+        "moment",
+        "mechanical",
+        "electrical",
+        "circuit",
+        "voltage",
+        "current",
+        "efficiency",
+        "traction",
+        "acceleration",
+        "autonomous",
+        "architecture",
+        "system design",
+        "component selection",
+        "parts list",
+        "bill of materials",
+        "bom",
+        "troubleshoot",
+        "debug",
+        "code",
+        "implement",
+        "algorithm",
     ]
 
-    for word in complex_words:
-
-        if word in text:
-
-            score += 2
-
     # --------------------------------------------------------
-    # LONG PROMPTS
+    # Very long prompts are usually more demanding.
     # --------------------------------------------------------
 
     word_count = len(text.split())
 
-    if word_count > 60:
+    complex_score = 0
 
-        score += 1
+    for keyword in complex_keywords:
+
+        if keyword in text:
+            complex_score += 1
+
+    # Numbers + engineering units are strong indicators.
+    engineering_units = [
+        "kg",
+        "nm",
+        "rpm",
+        "rpm",
+        "w",
+        "kw",
+        "v",
+        "amp",
+        "a",
+        "ah",
+        "wh",
+        "mm",
+        "cm",
+        "m/s",
+        "km/h",
+        "hz",
+        "°",
+        "deg",
+        "newton",
+        "joule",
+    ]
+
+    for unit in engineering_units:
+
+        if unit in text:
+            complex_score += 1
+
+    # Equations / calculations.
+    if any(
+        symbol in text
+        for symbol in [
+            "=",
+            "+",
+            "-",
+            "*",
+            "/",
+            "^",
+            "sin",
+            "cos",
+            "sqrt",
+        ]
+    ):
+        complex_score += 1
 
     if word_count > 120:
-
-        score += 2
+        complex_score += 2
 
     if word_count > 250:
-
-        score += 3
-
-    # --------------------------------------------------------
-    # MULTI-PART QUESTIONS
-    # --------------------------------------------------------
-
-    question_marks = text.count("?")
-
-    if question_marks >= 2:
-
-        score += 2
+        complex_score += 3
 
     # --------------------------------------------------------
-    # MULTI-CONSTRAINT DESIGN
+    # Explicit simple questions get the cheap model unless
+    # they clearly contain substantial engineering work.
     # --------------------------------------------------------
 
-    constraint_words = [
-        "and",
-        "while",
-        "with",
-        "under",
-        "maximum",
-        "minimum",
-        "budget",
-        "weight",
-        "runtime",
-        "speed",
-        "load",
-        "payload",
-    ]
-
-    constraint_count = sum(
-        1
-        for word in constraint_words
-        if word in text
+    looks_simple = any(
+        re.search(pattern, text)
+        for pattern in simple_patterns
     )
 
-    if constraint_count >= 4:
-
-        score += 2
-
-    # --------------------------------------------------------
-    # USE EXISTING ENGINEERING CONTEXT
-    # --------------------------------------------------------
-
-    memory_word_count = len(
-        memory.split()
-    )
-
-    if memory_word_count > 100:
-
-        score += 1
-
-    if memory_word_count > 200:
-
-        score += 1
+    if (
+        looks_simple
+        and complex_score <= 2
+        and word_count < 80
+    ):
+        return "simple"
 
     # --------------------------------------------------------
-    # FINAL CLASSIFICATION
+    # Complex engineering work.
     # --------------------------------------------------------
 
-    if score <= 0:
+    if complex_score >= 4 or word_count >= 180:
+        return "complex"
 
-        return "SIMPLE"
-
-    if score <= 5:
-
-        return "MEDIUM"
-
-    return "COMPLEX"
+    return "medium"
 
 
-# ============================================================
-# MODEL ROUTING POLICY
-# ============================================================
-
-def get_model_candidates(routing_level):
+def get_preferred_model(prompt):
     """
-    Return models in intelligent fallback order.
-
-    The fallback direction depends on the complexity
-    of the question.
+    Select the model based on the question difficulty.
     """
 
-    if routing_level == "SIMPLE":
+    difficulty = classify_question(prompt)
 
-        return [
-            MODEL_SIMPLE,
-            MODEL_MEDIUM,
-            MODEL_COMPLEX,
-        ]
+    if difficulty == "simple":
+        return MODEL_CHEAP
 
-    if routing_level == "MEDIUM":
+    if difficulty == "medium":
+        return MODEL_MEDIUM
 
-        return [
-            MODEL_MEDIUM,
-            MODEL_SIMPLE,
-            MODEL_COMPLEX,
-        ]
+    return MODEL_POWERFUL
 
-    # COMPLEX
 
-    return [
-        MODEL_COMPLEX,
+def get_model_fallback_order(prompt):
+    """
+    Return models in the order they should be attempted.
+
+    The preferred model is first.
+
+    If it is rate-limited, cheaper/other models are tried.
+    """
+
+    preferred = get_preferred_model(prompt)
+
+    order = [
+        preferred,
+        MODEL_CHEAP,
         MODEL_MEDIUM,
-        MODEL_SIMPLE,
+        MODEL_POWERFUL,
     ]
 
+    # Remove duplicates while preserving order.
+    result = []
 
-def choose_available_model(
-    routing_level,
-):
-    """
-    Select the first currently available model
-    appropriate for the question.
-    """
+    for model in order:
 
-    candidates = get_model_candidates(
-        routing_level
+        if model not in result:
+            result.append(model)
+
+    return result
+
+
+# ============================================================
+# USER-FRIENDLY MODEL NAME
+# ============================================================
+
+def model_display_name(model):
+
+    names = {
+        MODEL_CHEAP: "GPT-OSS 20B",
+        MODEL_MEDIUM: "Qwen 3.6 27B",
+        MODEL_POWERFUL: "GPT-OSS 120B",
+    }
+
+    return names.get(
+        model,
+        model,
     )
 
-    for model in candidates:
 
-        if model_is_available(model):
+# ============================================================
+# API ERROR DISPLAY
+# ============================================================
 
-            return model
+def show_all_models_unavailable():
 
-    return None
+    model_info = []
+
+    shortest_wait = None
+
+    for model in MODEL_ORDER:
+
+        remaining = get_model_remaining(model)
+
+        limit_type = (
+            st.session_state.model_limit_types.get(
+                model,
+                "RATE",
+            )
+        )
+
+        if remaining > 0:
+
+            model_info.append(
+                (
+                    model,
+                    remaining,
+                    limit_type,
+                )
+            )
+
+            if (
+                shortest_wait is None
+                or remaining < shortest_wait
+            ):
+                shortest_wait = remaining
+
+    if shortest_wait is not None:
+
+        minutes = shortest_wait // 60
+        seconds = shortest_wait % 60
+
+        if minutes > 0:
+
+            wait_text = (
+                f"{minutes}m {seconds:02d}s"
+            )
+
+        else:
+
+            wait_text = f"{seconds}s"
+
+        st.warning(
+            f"**All available models are temporarily unavailable.**\n\n"
+            f"The request could not be processed because the "
+            f"configured models have reached their current usage "
+            f"limits.\n\n"
+            f"The next model should become available in "
+            f"**{wait_text}**. Your message has not been lost."
+        )
+
+    else:
+
+        st.error(
+            "**The request could not be processed.**\n\n"
+            "None of the configured models were available. "
+            "Please try again later."
+        )
+
+
+# ============================================================
+# PAGE CONFIG
+# ============================================================
+
+st.set_page_config(
+    page_title="Robotics Engineering Assistant",
+    page_icon="🤖",
+    layout="wide",
+)
 
 
 # ============================================================
@@ -751,9 +766,7 @@ def clean_memory(memory):
     memory = memory.replace(
         "<memory>",
         "",
-    )
-
-    memory = memory.replace(
+    ).replace(
         "</memory>",
         "",
     )
@@ -775,7 +788,6 @@ def clean_memory(memory):
         )
 
         if last_newline > 0:
-
             memory = memory[
                 :last_newline
             ]
@@ -794,27 +806,14 @@ with st.sidebar:
     st.subheader("Settings")
 
     # --------------------------------------------------------
-    # MODEL ROUTING
+    # MODEL
     # --------------------------------------------------------
 
-    model_mode = st.selectbox(
-        "Model",
-        [
-            "Automatic",
-            "GPT-OSS 20B",
-            "Qwen 3.6 27B",
-            "GPT-OSS 120B",
-        ],
-        index=0,
+    st.info(
+        "Model selection is automatic. "
+        "Simple questions use a smaller model; "
+        "complex engineering problems use a stronger model."
     )
-
-    if model_mode == "Automatic":
-
-        st.caption(
-            "The assistant automatically selects "
-            "the cheapest model capable of handling "
-            "your question."
-        )
 
     # --------------------------------------------------------
     # STREAMING
@@ -943,15 +942,14 @@ with st.sidebar:
     reasoning_effort = st.selectbox(
         "Reasoning effort",
         (
-            "low",
-            "medium",
-            "high",
+            "default",
+            "none",
         ),
-        index=1,
+        index=0,
     )
 
     # ========================================================
-    # ENGINEERING MEMORY
+    # MEMORY
     # ========================================================
 
     st.subheader("Engineering Memory")
@@ -1004,65 +1002,69 @@ with st.sidebar:
     # MODEL STATUS
     # ========================================================
 
-    if model_mode == "Automatic":
+    st.subheader("Model Status")
 
-        st.subheader("Model Status")
+    for available_model in MODEL_ORDER:
 
-        for model in [
-            MODEL_SIMPLE,
-            MODEL_MEDIUM,
-            MODEL_COMPLEX,
-        ]:
+        remaining = get_model_remaining(
+            available_model
+        )
 
-            if model_is_available(model):
+        if remaining > 0:
 
-                st.caption(
-                    f"✓ {MODEL_NAMES[model]}"
+            minutes = remaining // 60
+            seconds = remaining % 60
+
+            if minutes > 0:
+
+                wait_text = (
+                    f"{minutes}m {seconds:02d}s"
                 )
 
             else:
 
-                remaining = (
-                    get_model_remaining_seconds(
-                        model
-                    )
-                )
+                wait_text = f"{seconds}s"
 
-                info = (
-                    st.session_state
-                    .model_cooldowns
-                    .get(model)
-                )
+            st.caption(
+                f"**{model_display_name(available_model)}** "
+                f"— unavailable ({wait_text})"
+            )
 
-                limit_type = (
-                    info["type"]
-                    if info
-                    else "LIMIT"
-                )
+        else:
 
-                st.caption(
-                    f"× {MODEL_NAMES[model]} — "
-                    f"{limit_type} — "
-                    f"{format_wait(remaining)}"
-                )
+            st.caption(
+                f"**{model_display_name(available_model)}** "
+                f"— available"
+            )
+
+    if st.session_state.last_model_used:
+
+        st.caption(
+            "Last used: "
+            + model_display_name(
+                st.session_state.last_model_used
+            )
+        )
+
+    # ========================================================
+    # CHAT COUNT
+    # ========================================================
 
     st.caption(
-        f"{len(st.session_state.messages)} "
-        f"messages in this chat"
+        f"{len(st.session_state.messages)} messages in this chat"
     )
 
 
 # ============================================================
-# SYSTEM PROMPT
+# COMPACT SYSTEM PROMPT
 # ============================================================
 
 system_prompt = f"""
 You are a Robotics Engineering Assistant.
 
-Help with mechanical, electrical, motors, actuators,
-batteries, sensors, controls, embedded systems,
-calculations, troubleshooting, optimization,
-component selection, and prototyping.
+Help with mechanical, electrical, motors, actuators, batteries,
+sensors, controls, embedded systems, calculations, troubleshooting,
+optimization, component selection, and prototyping.
 
 ENGINEERING:
 For substantial problems:
@@ -1070,67 +1072,44 @@ For substantial problems:
 2. State reasonable assumptions.
 3. Choose governing equations.
 4. Calculate important values.
-5. Check real-world losses and constraints.
-6. Check safety margins.
-7. Explain important tradeoffs.
-8. Give practical recommendations.
-9. Separate calculated values, assumptions,
-   estimates, and specifications.
+5. Check limits, losses, safety, and practical constraints.
+6. Explain key tradeoffs.
+7. Give practical recommendations.
+8. Separate calculated values, assumptions, estimates, and specifications.
 
 For simple questions, answer directly.
 
-REAL-WORLD ENGINEERING:
-Consider relevant:
-- motor efficiency
-- controller efficiency
-- gearbox efficiency
-- bearing losses
-- rolling resistance
-- battery losses
-- voltage sag
-- starting torque
-- acceleration
-- traction
-- thermal limits
-- safety margins
-- component tolerances
-
-Do not blindly assume ideal efficiency.
+REAL WORLD:
+Consider relevant drivetrain losses, motor/controller efficiency,
+rolling resistance, battery losses, voltage sag, traction,
+starting torque, acceleration, thermal limits, and safety margins.
 
 MATH:
 Use normal Markdown and Streamlit-compatible LaTeX.
 
-Inline:
-$F = ma$
+Inline: $F = ma$
 
 Display:
-
 $$
 F = ma
 $$
 
 Show equations before substitutions.
 
-Use simple LaTeX.
-
-Never use square brackets as math delimiters.
-
-Never put raw LaTeX outside math delimiters.
-
+Use simple LaTeX. Never use square brackets as math delimiters.
+Never put raw LaTeX outside math delimiters or equations in code blocks.
 Never create malformed constructs such as [4pt].
 
-ANSWER STYLE:
-Do not create an "Engineering Process" heading
-inside the actual answer.
+Use normal Markdown headings.
 
-Give enough work to verify important calculations,
-but do not unnecessarily repeat known information.
+Do not create an "Engineering Process" heading.
 
-Use tables when they improve clarity.
+ANSWER:
+Give enough work to verify important calculations.
+Do not unnecessarily repeat information already known from memory.
 
 ENGINEERING MEMORY:
 A compact engineering memory is supplied separately.
-
 Use it as project context.
 
 At the END of your response, output:
@@ -1139,14 +1118,14 @@ At the END of your response, output:
 ...
 </memory>
 
-The memory must be VERY SHORT.
+The memory must be VERY SHORT: maximum about 150 words.
 
 Store ONLY durable project information:
-- requirements
-- project facts
+- user requirements
+- important project facts
 - design decisions
 - calculated design values
-- assumptions
+- important assumptions
 - selected components
 - constraints
 - unresolved engineering issues
@@ -1159,11 +1138,11 @@ DO NOT store:
 - repeated information
 - conversational filler
 
+IMPORTANT:
 The <memory> section is internal application data.
-Do not mention it in the answer.
+Do not refer to it in the answer.
 
 USER SETTINGS:
-
 Length={response_length}
 Style={style}
 Detail={explanation_level}
@@ -1171,7 +1150,6 @@ Creativity={creativity}
 Units={units}
 
 PRIORITIES:
-
 Cost={cost_priority}
 Performance={performance_priority}
 Reliability={reliability_priority}
@@ -1194,10 +1172,7 @@ def build_messages():
         }
     ]
 
-    memory = (
-        st.session_state
-        .engineering_memory
-    )
+    memory = st.session_state.engineering_memory
 
     if memory:
 
@@ -1211,11 +1186,9 @@ def build_messages():
             }
         )
 
-    recent_messages = (
-        st.session_state.messages[
-            -MAX_HISTORY_MESSAGES:
-        ]
-    )
+    recent_messages = st.session_state.messages[
+        -MAX_HISTORY_MESSAGES:
+    ]
 
     messages.extend(
         recent_messages
@@ -1225,13 +1198,12 @@ def build_messages():
 
 
 # ============================================================
-# RESPONSE / MEMORY EXTRACTION
+# EXTRACT ANSWER + MEMORY
 # ============================================================
 
 def extract_response(raw_text):
 
     if not raw_text:
-
         return "", ""
 
     memory_match = re.search(
@@ -1253,199 +1225,48 @@ def extract_response(raw_text):
     else:
 
         answer = raw_text.rstrip()
-
         memory = ""
 
-    return (
-        answer,
-        memory,
-    )
+    return answer, memory
 
 
 # ============================================================
-# MODEL SELECTION
+# API REQUEST HELPERS
 # ============================================================
 
-def get_selected_model(
-    prompt,
-):
-
-    # --------------------------------------------------------
-    # MANUAL MODE
-    # --------------------------------------------------------
-
-    if model_mode != "Automatic":
-
-        manual_models = {
-            "GPT-OSS 20B": MODEL_SIMPLE,
-            "Qwen 3.6 27B": MODEL_MEDIUM,
-            "GPT-OSS 120B": MODEL_COMPLEX,
-        }
-
-        return (
-            manual_models[model_mode],
-            None,
-        )
-
-    # --------------------------------------------------------
-    # AUTOMATIC MODE
-    # --------------------------------------------------------
-
-    routing_level = classify_question(
-        prompt,
-        st.session_state.engineering_memory,
-        st.session_state.messages,
-    )
-
-    candidates = get_model_candidates(
-        routing_level
-    )
-
-    for model in candidates:
-
-        if model_is_available(model):
-
-            return (
-                model,
-                routing_level,
-            )
-
-    return (
-        None,
-        routing_level,
-    )
-
-
-# ============================================================
-# API REQUEST WITH INTELLIGENT FAILOVER
-# ============================================================
-
-def request_model(
-    messages,
-    selected_model,
-    routing_level,
-    temperature,
+def create_request(
+    model,
+    request_messages,
+    creativity,
     reasoning_effort,
-    max_completion_tokens,
     stream,
 ):
+    """
+    Create a Groq request.
 
-    # --------------------------------------------------------
-    # Candidates
-    # --------------------------------------------------------
+    Deliberately does NOT specify service_tier="auto".
+    Groq rejected that option for the user's organization.
+    """
 
-    if selected_model:
+    kwargs = {
+        "model": model,
+        "messages": request_messages,
+        "temperature": creativity,
+        "reasoning_effort": reasoning_effort,
+        "max_completion_tokens": MAX_COMPLETION_TOKENS,
+        "stream": stream,
+    }
 
-        if routing_level:
+    # gpt-oss models support separate reasoning output.
+    # This keeps the existing Engineering Process box.
+    if model in (
+        MODEL_CHEAP,
+        MODEL_POWERFUL,
+    ):
+        kwargs["include_reasoning"] = True
 
-            candidates = [
-                selected_model
-            ]
-
-            for candidate in get_model_candidates(
-                routing_level
-            ):
-
-                if candidate != selected_model:
-
-                    candidates.append(
-                        candidate
-                    )
-
-        else:
-
-            candidates = [
-                selected_model
-            ]
-
-    else:
-
-        candidates = []
-
-    # --------------------------------------------------------
-    # Try models
-    # --------------------------------------------------------
-
-    last_error = None
-
-    for model in candidates:
-
-        if not model_is_available(model):
-
-            continue
-
-        try:
-
-            response = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                reasoning_effort=reasoning_effort,
-                max_completion_tokens=max_completion_tokens,
-                stream=stream,
-                service_tier="auto",
-            )
-
-            return (
-                response,
-                model,
-            )
-
-        except Exception as error:
-
-            last_error = error
-
-            limit_type = (
-                get_rate_limit_type(error)
-            )
-
-            # ------------------------------------------------
-            # RATE LIMIT
-            # ------------------------------------------------
-
-            if limit_type:
-
-                mark_model_limited(
-                    model,
-                    error,
-                )
-
-                continue
-
-            # ------------------------------------------------
-            # TEMPORARY SERVER ERROR
-            # ------------------------------------------------
-
-            error_text = str(error).lower()
-
-            if (
-                "500" in error_text
-                or "502" in error_text
-                or "503" in error_text
-                or "capacity" in error_text
-                or "temporarily unavailable"
-                in error_text
-            ):
-
-                mark_model_temporarily_unavailable(
-                    model,
-                    30,
-                )
-
-                continue
-
-            # ------------------------------------------------
-            # OTHER ERROR
-            # ------------------------------------------------
-
-            raise error
-
-    if last_error:
-
-        raise last_error
-
-    raise RuntimeError(
-        "ALL_MODELS_LIMITED"
+    return client.chat.completions.create(
+        **kwargs
     )
 
 
@@ -1459,12 +1280,10 @@ st.title(
 
 
 # ============================================================
-# DISPLAY CHAT
+# DISPLAY PREVIOUS CHAT
 # ============================================================
 
-for message in (
-    st.session_state.messages
-):
+for message in st.session_state.messages:
 
     with st.chat_message(
         message["role"]
@@ -1473,6 +1292,21 @@ for message in (
         render_markdown(
             message["content"]
         )
+
+
+# ============================================================
+# RATE LIMIT STATUS
+# ============================================================
+
+available_models = get_available_models()
+
+if not available_models:
+
+    show_all_models_unavailable()
+
+    # Refresh countdown.
+    time.sleep(1)
+    st.rerun()
 
 
 # ============================================================
@@ -1491,7 +1325,7 @@ prompt = st.chat_input(
 if prompt:
 
     # --------------------------------------------------------
-    # SAVE USER MESSAGE IMMEDIATELY
+    # SAVE USER MESSAGE
     # --------------------------------------------------------
 
     st.session_state.messages.append(
@@ -1501,480 +1335,449 @@ if prompt:
         }
     )
 
+    # --------------------------------------------------------
+    # DISPLAY USER MESSAGE
+    # --------------------------------------------------------
+
     with st.chat_message("user"):
 
         render_markdown(prompt)
 
     # --------------------------------------------------------
-    # SELECT MODEL
+    # BUILD OPTIMIZED CONTEXT
     # --------------------------------------------------------
 
-    selected_model, routing_level = (
-        get_selected_model(prompt)
+    request_messages = build_messages()
+
+    # --------------------------------------------------------
+    # AUTOMATIC MODEL SELECTION
+    # --------------------------------------------------------
+
+    difficulty = classify_question(
+        prompt
     )
 
-    # --------------------------------------------------------
-    # NO MODEL AVAILABLE
-    # --------------------------------------------------------
-
-    if selected_model is None:
-
-        available_again = []
-
-        for model in MODEL_PRIORITY:
-
-            remaining = (
-                get_model_remaining_seconds(
-                    model
-                )
-            )
-
-            if remaining > 0:
-
-                available_again.append(
-                    (
-                        MODEL_NAMES[model],
-                        remaining,
-                    )
-                )
-
-        with st.chat_message(
-            "assistant"
-        ):
-
-            st.error(
-                """
-### Unable to process this request right now
-
-All available models are currently unavailable
-because their usage limits have been reached.
-
-Your message has **not been lost**.
-
-The system will automatically use the models again
-as their limits reset.
-"""
-            )
-
-            if available_again:
-
-                st.caption(
-                    "Current model cooldowns:"
-                )
-
-                for name, seconds in (
-                    available_again
-                ):
-
-                    st.caption(
-                        f"• {name}: "
-                        f"{format_wait(seconds)}"
-                    )
-
-        st.stop()
-
-    # --------------------------------------------------------
-    # STORE ROUTING INFORMATION
-    # --------------------------------------------------------
-
-    st.session_state.last_model_used = (
-        selected_model
+    preferred_model = get_preferred_model(
+        prompt
     )
 
-    st.session_state.last_routing_level = (
-        routing_level
+    model_attempts = (
+        get_model_fallback_order(
+            prompt
+        )
     )
 
-    # --------------------------------------------------------
-    # BUILD CONTEXT
-    # --------------------------------------------------------
-
-    request_messages = (
-        build_messages()
-    )
+    # Only try models that are currently available.
+    model_attempts = [
+        model
+        for model in model_attempts
+        if is_model_available(model)
+    ]
 
     # ========================================================
     # ASSISTANT
     # ========================================================
 
-    with st.chat_message(
-        "assistant"
-    ):
+    with st.chat_message("assistant"):
 
-        # ----------------------------------------------------
-        # SHOW ROUTING
-        # ----------------------------------------------------
+        successful_response = False
 
-        if model_mode == "Automatic":
-
-            level_name = (
-                routing_level.lower()
-                if routing_level
-                else "automatic"
-            )
-
-            routing_placeholder = st.empty()
-
-            routing_placeholder.caption(
-                f"Selected {level_name} "
-                f"reasoning path · "
-                f"{MODEL_NAMES[selected_model]}"
-            )
+        answer_text = ""
+        new_memory = ""
+        reasoning_text = ""
 
         # ====================================================
-        # STREAMING
+        # TRY MODELS
         # ====================================================
 
-        if stream_it:
+        for model_index, current_model in enumerate(
+            model_attempts
+        ):
 
-            try:
+            # ------------------------------------------------
+            # STREAMING
+            # ------------------------------------------------
 
-                stream, model_used = (
-                    request_model(
-                        messages=request_messages,
-                        selected_model=selected_model,
-                        routing_level=routing_level,
-                        temperature=creativity,
+            if stream_it:
+
+                try:
+
+                    stream = create_request(
+                        model=current_model,
+                        request_messages=request_messages,
+                        creativity=creativity,
                         reasoning_effort=reasoning_effort,
-                        max_completion_tokens=(
-                            MAX_COMPLETION_TOKENS
-                        ),
                         stream=True,
                     )
-                )
 
-            except RuntimeError as error:
+                except Exception as e:
 
-                if str(error) == "ALL_MODELS_LIMITED":
+                    if is_rate_limit_error(e):
+
+                        set_model_cooldown(
+                            current_model,
+                            e,
+                        )
+
+                        continue
+
+                    # If the selected model has some other
+                    # configuration/API error, try another
+                    # configured model as well.
+                    if model_index < len(
+                        model_attempts
+                    ) - 1:
+
+                        continue
 
                     st.error(
-                        """
-### Unable to process this request right now
-
-All suitable models have reached their current
-usage limits.
-
-Your message has **not been lost**.
-
-The system will automatically retry with an
-appropriate model when capacity becomes available.
-"""
+                        f"API request failed: "
+                        f"{type(e).__name__}: {e}"
                     )
+
+                    st.session_state.messages.pop()
 
                     st.stop()
 
-                st.error(
-                    f"API request failed: {error}"
-                )
+                # ------------------------------------------------
+                # ENGINEERING PROCESS
+                # ------------------------------------------------
 
-                st.stop()
+                with st.expander(
+                    "Engineering Process",
+                    expanded=True,
+                ):
 
-            except Exception as error:
+                    thinking_placeholder = st.empty()
 
-                st.error(
-                    f"API request failed: "
-                    f"{type(error).__name__}: "
-                    f"{error}"
-                )
+                # ------------------------------------------------
+                # ANSWER
+                # ------------------------------------------------
 
-                st.stop()
+                answer_placeholder = st.empty()
 
-            # ------------------------------------------------
-            # MODEL ACTUALLY USED
-            # ------------------------------------------------
+                reasoning_text = ""
+                raw_answer_text = ""
 
-            if model_used != selected_model:
+                stream_failed = False
 
-                routing_placeholder.caption(
-                    f"Automatic fallback · "
-                    f"{MODEL_NAMES[model_used]}"
-                )
+                # ------------------------------------------------
+                # STREAM
+                # ------------------------------------------------
 
-            else:
+                try:
 
-                routing_placeholder.caption(
-                    f"{MODEL_NAMES[model_used]}"
-                )
+                    for chunk in stream:
 
-            # ------------------------------------------------
-            # ENGINEERING PROCESS
-            # ------------------------------------------------
+                        if not chunk.choices:
+                            continue
 
-            with st.expander(
-                "Engineering Process",
-                expanded=True,
-            ):
+                        delta = (
+                            chunk.choices[0].delta
+                        )
 
-                thinking_placeholder = (
-                    st.empty()
-                )
+                        # ========================================
+                        # REASONING
+                        # ========================================
 
-            # ------------------------------------------------
-            # ANSWER
-            # ------------------------------------------------
+                        reasoning = getattr(
+                            delta,
+                            "reasoning",
+                            None,
+                        )
 
-            answer_placeholder = (
-                st.empty()
-            )
+                        if not reasoning:
 
-            reasoning_text = ""
+                            reasoning = getattr(
+                                delta,
+                                "reasoning_content",
+                                None,
+                            )
 
-            raw_answer_text = ""
+                        if reasoning:
 
-            # ------------------------------------------------
-            # STREAM
-            # ------------------------------------------------
+                            reasoning_text += (
+                                reasoning
+                            )
 
-            for chunk in stream:
+                            thinking_placeholder.markdown(
+                                clean_latex(
+                                    reasoning_text
+                                )
+                            )
 
-                if not chunk.choices:
+                        # ========================================
+                        # FINAL RESPONSE
+                        # ========================================
+
+                        content = getattr(
+                            delta,
+                            "content",
+                            None,
+                        )
+
+                        if content:
+
+                            raw_answer_text += (
+                                content
+                            )
+
+                            visible_answer, _ = (
+                                extract_response(
+                                    raw_answer_text
+                                )
+                            )
+
+                            answer_placeholder.markdown(
+                                clean_latex(
+                                    visible_answer
+                                )
+                            )
+
+                except Exception as e:
+
+                    stream_failed = True
+
+                    if is_rate_limit_error(e):
+
+                        set_model_cooldown(
+                            current_model,
+                            e,
+                        )
+
+                    else:
+
+                        st.error(
+                            f"API request failed: "
+                            f"{type(e).__name__}: {e}"
+                        )
+
+                        st.session_state.messages.pop()
+
+                        st.stop()
+
+                # ------------------------------------------------
+                # If a model became rate-limited while streaming,
+                # try another model.
+                # ------------------------------------------------
+
+                if stream_failed:
+
+                    answer_placeholder.empty()
+                    thinking_placeholder.empty()
 
                     continue
 
-                delta = (
-                    chunk.choices[0].delta
+                # ------------------------------------------------
+                # FINAL EXTRACTION
+                # ------------------------------------------------
+
+                answer_text, new_memory = (
+                    extract_response(
+                        raw_answer_text
+                    )
                 )
 
-                # ============================================
-                # REASONING
-                # ============================================
+                # ------------------------------------------------
+                # UPDATE MEMORY
+                # ------------------------------------------------
 
-                reasoning = getattr(
-                    delta,
+                if new_memory:
+
+                    st.session_state.engineering_memory = (
+                        new_memory
+                    )
+
+                # ------------------------------------------------
+                # REASONING FALLBACK
+                # ------------------------------------------------
+
+                if not reasoning_text:
+
+                    thinking_placeholder.markdown(
+                        "*No separate reasoning was returned by the model.*"
+                    )
+
+                # ------------------------------------------------
+                # SAVE MODEL
+                # ------------------------------------------------
+
+                st.session_state.last_model_used = (
+                    current_model
+                )
+
+                successful_response = True
+
+                break
+
+            # ====================================================
+            # NON-STREAMING
+            # ====================================================
+
+            else:
+
+                with st.spinner(
+                    "Thinking..."
+                ):
+
+                    try:
+
+                        response = create_request(
+                            model=current_model,
+                            request_messages=request_messages,
+                            creativity=creativity,
+                            reasoning_effort=reasoning_effort,
+                            stream=False,
+                        )
+
+                    except Exception as e:
+
+                        if is_rate_limit_error(e):
+
+                            set_model_cooldown(
+                                current_model,
+                                e,
+                            )
+
+                            continue
+
+                        if model_index < len(
+                            model_attempts
+                        ) - 1:
+
+                            continue
+
+                        st.error(
+                            f"API request failed: "
+                            f"{type(e).__name__}: {e}"
+                        )
+
+                        st.session_state.messages.pop()
+
+                        st.stop()
+
+                # ------------------------------------------------
+                # RAW RESPONSE
+                # ------------------------------------------------
+
+                raw_response = (
+                    response
+                    .choices[0]
+                    .message
+                    .content
+                    or ""
+                )
+
+                # ------------------------------------------------
+                # EXTRACT ANSWER + MEMORY
+                # ------------------------------------------------
+
+                answer_text, new_memory = (
+                    extract_response(
+                        raw_response
+                    )
+                )
+
+                # ------------------------------------------------
+                # UPDATE MEMORY
+                # ------------------------------------------------
+
+                if new_memory:
+
+                    st.session_state.engineering_memory = (
+                        new_memory
+                    )
+
+                # ------------------------------------------------
+                # GET REASONING
+                # ------------------------------------------------
+
+                reasoning_text = getattr(
+                    response.choices[0].message,
                     "reasoning",
                     None,
                 )
 
-                if reasoning:
+                if not reasoning_text:
 
-                    reasoning_text += reasoning
+                    reasoning_text = getattr(
+                        response.choices[0].message,
+                        "reasoning_content",
+                        None,
+                    )
 
-                    thinking_placeholder.markdown(
-                        clean_latex(
+                # ------------------------------------------------
+                # ENGINEERING PROCESS
+                # ------------------------------------------------
+
+                with st.expander(
+                    "Engineering Process",
+                    expanded=False,
+                ):
+
+                    if reasoning_text:
+
+                        render_markdown(
                             reasoning_text
                         )
-                    )
 
-                # ============================================
-                # FINAL ANSWER
-                # ============================================
+                    else:
 
-                content = getattr(
-                    delta,
-                    "content",
-                    None,
-                )
-
-                if content:
-
-                    raw_answer_text += content
-
-                    visible_answer, _ = (
-                        extract_response(
-                            raw_answer_text
+                        st.markdown(
+                            "*No reasoning was returned.*"
                         )
-                    )
 
-                    answer_placeholder.markdown(
-                        clean_latex(
-                            visible_answer
-                        )
-                    )
+                # ------------------------------------------------
+                # DISPLAY FULL ANSWER
+                # ------------------------------------------------
 
-            # ------------------------------------------------
-            # FINAL EXTRACTION
-            # ------------------------------------------------
-
-            answer_text, new_memory = (
-                extract_response(
-                    raw_answer_text
-                )
-            )
-
-            # ------------------------------------------------
-            # MEMORY
-            # ------------------------------------------------
-
-            if new_memory:
-
-                st.session_state.engineering_memory = (
-                    new_memory
+                render_markdown(
+                    answer_text
                 )
 
-            # ------------------------------------------------
-            # REASONING FALLBACK
-            # ------------------------------------------------
+                # ------------------------------------------------
+                # SAVE MODEL
+                # ------------------------------------------------
 
-            if not reasoning_text:
-
-                thinking_placeholder.markdown(
-                    "*No separate reasoning was returned "
-                    "by the model.*"
+                st.session_state.last_model_used = (
+                    current_model
                 )
 
-            # ------------------------------------------------
-            # SAVE ANSWER
-            # ------------------------------------------------
+                successful_response = True
 
-            st.session_state.messages.append(
-                {
-                    "role": "assistant",
-                    "content": answer_text,
-                }
-            )
+                break
 
-        # ====================================================
-        # NON-STREAMING
-        # ====================================================
+        # ========================================================
+        # ALL MODELS FAILED
+        # ========================================================
 
-        else:
+        if not successful_response:
 
-            with st.spinner(
-                "Thinking..."
+            # Remove the unsent user message so the chat does
+            # not pretend the request was successfully processed.
+            if (
+                st.session_state.messages
+                and st.session_state.messages[-1][
+                    "role"
+                ] == "user"
+                and st.session_state.messages[-1][
+                    "content"
+                ] == prompt
             ):
 
-                try:
+                st.session_state.messages.pop()
 
-                    response, model_used = (
-                        request_model(
-                            messages=request_messages,
-                            selected_model=selected_model,
-                            routing_level=routing_level,
-                            temperature=creativity,
-                            reasoning_effort=reasoning_effort,
-                            max_completion_tokens=(
-                                MAX_COMPLETION_TOKENS
-                            ),
-                            stream=False,
-                        )
-                    )
+            show_all_models_unavailable()
 
-                except RuntimeError as error:
+            st.stop()
 
-                    if str(error) == (
-                        "ALL_MODELS_LIMITED"
-                    ):
+        # ========================================================
+        # SAVE FINAL ANSWER
+        # ========================================================
 
-                        st.error(
-                            """
-### Unable to process this request right now
-
-All suitable models have reached their current
-usage limits.
-
-Your message has **not been lost**.
-
-The system will automatically use an appropriate
-model again when capacity becomes available.
-"""
-                        )
-
-                        st.stop()
-
-                    st.error(
-                        f"API request failed: {error}"
-                    )
-
-                    st.stop()
-
-                except Exception as error:
-
-                    st.error(
-                        f"API request failed: "
-                        f"{type(error).__name__}: "
-                        f"{error}"
-                    )
-
-                    st.stop()
-
-            # ------------------------------------------------
-            # MODEL
-            # ------------------------------------------------
-
-            if model_used != selected_model:
-
-                st.caption(
-                    f"Automatic fallback · "
-                    f"{MODEL_NAMES[model_used]}"
-                )
-
-            else:
-
-                st.caption(
-                    f"Model: "
-                    f"{MODEL_NAMES[model_used]}"
-                )
-
-            # ------------------------------------------------
-            # RESPONSE
-            # ------------------------------------------------
-
-            raw_response = (
-                response
-                .choices[0]
-                .message
-                .content
-                or ""
-            )
-
-            answer_text, new_memory = (
-                extract_response(
-                    raw_response
-                )
-            )
-
-            # ------------------------------------------------
-            # MEMORY
-            # ------------------------------------------------
-
-            if new_memory:
-
-                st.session_state.engineering_memory = (
-                    new_memory
-                )
-
-            # ------------------------------------------------
-            # REASONING
-            # ------------------------------------------------
-
-            reasoning_text = getattr(
-                response.choices[0].message,
-                "reasoning",
-                None,
-            )
-
-            with st.expander(
-                "Engineering Process",
-                expanded=False,
-            ):
-
-                if reasoning_text:
-
-                    render_markdown(
-                        reasoning_text
-                    )
-
-                else:
-
-                    st.markdown(
-                        "*No reasoning was returned.*"
-                    )
-
-            # ------------------------------------------------
-            # ANSWER
-            # ------------------------------------------------
-
-            render_markdown(
-                answer_text
-            )
-
-            # ------------------------------------------------
-            # SAVE
-            # ------------------------------------------------
-
-            st.session_state.messages.append(
-                {
-                    "role": "assistant",
-                    "content": answer_text,
-                }
-            )
+        st.session_state.messages.append(
+            {
+                "role": "assistant",
+                "content": answer_text,
+            }
+        )
