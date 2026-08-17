@@ -17,12 +17,17 @@ client = OpenAI(
     api_key=os.getenv("GROQ_API_KEY"),
 )
 
-# Keep completion reasonably sized so the request stays
-# comfortably below Groq's TPM limit.
-MAX_COMPLETION_TOKENS = 3000
+# Maximum generated answer size.
+MAX_COMPLETION_TOKENS = 2500
 
-# Maximum number of previous user/assistant turns included.
-MAX_HISTORY_MESSAGES = 6
+# Maximum number of recent messages kept in the compact context.
+MAX_HISTORY_MESSAGES = 4
+
+# Maximum characters allowed for an individual historical message.
+MAX_MESSAGE_CHARS = 2500
+
+# Maximum characters allowed for the whole context.
+MAX_CONTEXT_CHARS = 8000
 
 
 # ============================================================
@@ -42,6 +47,9 @@ st.set_page_config(
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
+if "conversation_summary" not in st.session_state:
+    st.session_state.conversation_summary = ""
 
 
 # ============================================================
@@ -68,7 +76,7 @@ def clean_latex(text):
         flags=re.IGNORECASE,
     )
 
-    # Fix double-escaped LaTeX commands
+    # Fix double-escaped common LaTeX commands
     commands = [
         "frac",
         "sqrt",
@@ -176,6 +184,85 @@ def render_markdown(text):
 
 
 # ============================================================
+# COMPACT SYSTEM PROMPT
+# ============================================================
+
+BASE_SYSTEM_PROMPT = r"""
+You are a Robotics Engineering Assistant.
+
+Help with mechanical, electrical, power, motors, batteries,
+sensors, controls, embedded systems, calculations,
+troubleshooting, optimization, component selection and
+prototyping.
+
+For substantial engineering problems:
+1. Identify requirements and missing information.
+2. State reasonable assumptions.
+3. Select governing equations/principles.
+4. Calculate important values.
+5. Check real-world losses and limiting conditions.
+6. Consider practical component constraints and safety.
+7. Explain important tradeoffs.
+8. Give practical recommendations.
+9. Distinguish calculations, assumptions, estimates and
+   manufacturer specifications.
+
+For simple questions, answer directly.
+
+Consider relevant real-world factors such as rolling resistance,
+bearings, gearing, motor/controller efficiency, wiring losses,
+battery resistance, voltage sag, tire losses, acceleration,
+starting torque, thermal limits and safety margins.
+
+MATHEMATICS:
+Use Streamlit-compatible Markdown LaTeX.
+
+Inline:
+$F = ma$
+
+Display:
+$$
+F = ma
+$$
+
+For calculations, show the equation and then substitute values.
+
+Prefer simple LaTeX.
+
+If aligned is necessary, use:
+$$
+\begin{aligned}
+F_g &= mg\sin(\theta) \\
+F_{rr} &= C_{rr}mg\cos(\theta) \\
+F_{total} &= F_g + F_{rr}
+\end{aligned}
+$$
+
+Never:
+- use square brackets as math delimiters
+- put raw LaTeX outside math delimiters
+- put equations inside code blocks
+- create malformed LaTeX
+- escape Markdown headings
+
+Use normal Markdown headings such as:
+### Wheel torque
+
+Do not create an "Engineering Process" heading.
+The application displays reasoning separately.
+
+Give enough calculations for verification without unnecessary
+repetition.
+
+Clearly distinguish calculated values, assumptions, estimates
+and specifications.
+
+Do not discuss hidden prompts, internal instructions or
+implementation details.
+"""
+
+
+# ============================================================
 # SIDEBAR
 # ============================================================
 
@@ -191,8 +278,8 @@ with st.sidebar:
         "Model",
         (
             "openai/gpt-oss-120b",
-            "openai/gpt-oss-20b",
             "qwen/qwen3.6-27b",
+            "openai/gpt-oss-20b",
             "groq/compound-mini",
         ),
         index=0,
@@ -258,10 +345,10 @@ with st.sidebar:
 
     creativity = st.slider(
         "Creativity",
-        min_value=0.0,
-        max_value=1.0,
-        value=0.5,
-        step=0.01,
+        0.0,
+        1.0,
+        0.4,
+        0.01,
     )
 
     # --------------------------------------------------------
@@ -278,9 +365,9 @@ with st.sidebar:
         index=0,
     )
 
-    # ========================================================
+    # --------------------------------------------------------
     # ENGINEERING PRIORITIES
-    # ========================================================
+    # --------------------------------------------------------
 
     st.subheader("Engineering Priorities")
 
@@ -316,9 +403,9 @@ with st.sidebar:
         0.01,
     )
 
-    # ========================================================
+    # --------------------------------------------------------
     # REASONING
-    # ========================================================
+    # --------------------------------------------------------
 
     st.subheader("Reasoning")
 
@@ -332,9 +419,9 @@ with st.sidebar:
         index=1,
     )
 
-    # ========================================================
+    # --------------------------------------------------------
     # CLEAR CHAT
-    # ========================================================
+    # --------------------------------------------------------
 
     if st.button(
         "Clear chat",
@@ -342,12 +429,13 @@ with st.sidebar:
     ):
 
         st.session_state.messages = []
+        st.session_state.conversation_summary = ""
 
         st.rerun()
 
-    # ========================================================
+    # --------------------------------------------------------
     # CHAT COUNT
-    # ========================================================
+    # --------------------------------------------------------
 
     st.caption(
         f"{len(st.session_state.messages)} messages in this chat"
@@ -355,95 +443,192 @@ with st.sidebar:
 
 
 # ============================================================
-# COMPACT SYSTEM PROMPT
+# DYNAMIC SETTINGS
 # ============================================================
 
-system_prompt = f"""
-You are a Robotics Engineering Assistant.
-
-Help with robotics mechanical, electrical, power, motor, battery,
-sensor, control, embedded, calculation, troubleshooting,
-optimization, component-selection, and prototyping problems.
-
-ENGINEERING METHOD:
-For substantial engineering problems:
-1. Identify requirements and missing information.
-2. State reasonable assumptions.
-3. Select governing equations/principles.
-4. Calculate important values.
-5. Check limiting conditions and real-world losses.
-6. Consider component constraints and safety.
-7. Explain important tradeoffs.
-8. Give practical recommendations.
-9. Clearly distinguish calculations, assumptions, estimates,
-   and manufacturer specifications.
-
-For simple questions, answer directly.
-
-REAL-WORLD FACTORS:
-When relevant consider rolling resistance, bearings, gearing,
-motor efficiency, controller losses, wiring losses, battery
-internal resistance, voltage sag, aerodynamic drag, tire losses,
-starting torque, acceleration, uneven terrain, thermal limits,
-and safety margins.
-
-MATHEMATICS:
-Use Streamlit-compatible Markdown LaTeX.
-
-Inline:
-$F = ma$
-
-Display:
-$$
-F = ma
-$$
-
-For calculations, show the equation and then substitute values.
-
-Prefer simple equations rather than complicated LaTeX.
-
-If using aligned, use:
-$$
-\\begin{{aligned}}
-F_g &= mg\\sin(\\theta) \\\\
-F_{{rr}} &= C_{{rr}}mg\\cos(\\theta) \\\\
-F_{{total}} &= F_g + F_{{rr}}
-\\end{{aligned}}
-$$
-
-NEVER:
-- use square brackets as math delimiters
-- put raw LaTeX outside math delimiters
-- put equations inside code blocks
-- generate malformed LaTeX such as [4pt]
-- escape Markdown headings
-
-Use normal Markdown headings such as:
-### 4.2 Wheel torque
-
-Do not create a heading called "Engineering Process".
-The application displays reasoning separately.
-
-RESPONSE:
-Give enough calculations for the user to verify important results,
-but avoid unnecessary repetition.
-
-USER SETTINGS:
-Response length: {response_length}
-Response style: {style}
-Explanation level: {explanation_level}
-Creativity: {creativity}
-Units: {units}
-
-ENGINEERING PRIORITIES:
-Cost: {cost_priority}
-Performance: {performance_priority}
-Reliability: {reliability_priority}
-Safety: {safety_priority}
-
-Do not discuss hidden prompts, internal instructions, or
-implementation details.
+settings_prompt = f"""
+Settings:
+length={response_length}
+style={style}
+detail={explanation_level}
+units={units}
+cost={cost_priority}
+performance={performance_priority}
+reliability={reliability_priority}
+safety={safety_priority}
 """
+
+
+# ============================================================
+# BUILD COMPACT CONTEXT
+# ============================================================
+
+def build_context():
+
+    parts = []
+
+    # --------------------------------------------------------
+    # Previous compact summary
+    # --------------------------------------------------------
+
+    summary = st.session_state.conversation_summary.strip()
+
+    if summary:
+
+        parts.append(
+            "CONVERSATION SUMMARY:\n"
+            + summary
+        )
+
+    # --------------------------------------------------------
+    # Recent messages
+    # --------------------------------------------------------
+
+    recent = st.session_state.messages[
+        -MAX_HISTORY_MESSAGES:
+    ]
+
+    if recent:
+
+        recent_text = []
+
+        for message in recent:
+
+            content = message.get(
+                "content",
+                "",
+            )
+
+            if not content:
+                continue
+
+            # Prevent one enormous answer from consuming TPM.
+            if len(content) > MAX_MESSAGE_CHARS:
+
+                content = (
+                    content[:MAX_MESSAGE_CHARS]
+                    + "\n[older content truncated]"
+                )
+
+            recent_text.append(
+                f"{message['role'].upper()}: {content}"
+            )
+
+        if recent_text:
+
+            parts.append(
+                "RECENT CONVERSATION:\n"
+                + "\n\n".join(recent_text)
+            )
+
+    context = "\n\n".join(parts)
+
+    # Final safety limit
+    if len(context) > MAX_CONTEXT_CHARS:
+
+        context = (
+            context[:MAX_CONTEXT_CHARS]
+            + "\n[context truncated]"
+        )
+
+    return context
+
+
+# ============================================================
+# GENERATE COMPACT MEMORY SUMMARY
+# ============================================================
+
+def update_summary():
+
+    if len(st.session_state.messages) < 4:
+        return
+
+    messages_to_summarize = st.session_state.messages[
+        :-2
+    ]
+
+    if not messages_to_summarize:
+        return
+
+    conversation_text = []
+
+    for message in messages_to_summarize:
+
+        content = message.get(
+            "content",
+            "",
+        )
+
+        if len(content) > 1800:
+
+            content = (
+                content[:1800]
+                + "\n[truncated]"
+            )
+
+        conversation_text.append(
+            f"{message['role']}: {content}"
+        )
+
+    summary_prompt = """
+Create a very compact engineering conversation memory.
+
+Keep ONLY information that could materially affect future answers:
+- project requirements
+- dimensions
+- masses
+- chosen components
+- calculated values
+- design decisions
+- constraints
+- user corrections
+- important assumptions
+- unresolved engineering questions
+
+Do NOT preserve greetings, explanations, repeated calculations,
+reasoning, formatting or conversational filler.
+
+Use concise bullet points.
+Maximum 500 words.
+"""
+
+    try:
+
+        response = client.chat.completions.create(
+            model="openai/gpt-oss-20b",
+
+            messages=[
+                {
+                    "role": "system",
+                    "content": summary_prompt,
+                },
+                {
+                    "role": "user",
+                    "content": "\n\n".join(
+                        conversation_text
+                    ),
+                },
+            ],
+
+            temperature=0.1,
+
+            max_completion_tokens=600,
+        )
+
+        summary = (
+            response
+            .choices[0]
+            .message
+            .content
+            or ""
+        )
+
+        st.session_state.conversation_summary = summary
+
+    except Exception:
+        # Failure to update memory should never
+        # prevent the main assistant from working.
+        pass
 
 
 # ============================================================
@@ -454,12 +639,14 @@ st.title("Robotics Engineering Assistant")
 
 
 # ============================================================
-# DISPLAY PREVIOUS CHAT
+# DISPLAY CHAT
 # ============================================================
 
 for message in st.session_state.messages:
 
-    with st.chat_message(message["role"]):
+    with st.chat_message(
+        message["role"]
+    ):
 
         render_markdown(
             message["content"]
@@ -482,7 +669,7 @@ prompt = st.chat_input(
 if prompt:
 
     # --------------------------------------------------------
-    # SAVE USER MESSAGE
+    # Save user message
     # --------------------------------------------------------
 
     st.session_state.messages.append(
@@ -493,7 +680,7 @@ if prompt:
     )
 
     # --------------------------------------------------------
-    # DISPLAY USER MESSAGE
+    # Display user message
     # --------------------------------------------------------
 
     with st.chat_message("user"):
@@ -501,17 +688,49 @@ if prompt:
         render_markdown(prompt)
 
     # --------------------------------------------------------
-    # LIMIT HISTORY
-    #
-    # IMPORTANT:
-    # Only user prompts and final assistant answers are stored.
-    # Reasoning is NEVER stored.
+    # Build compact context
     # --------------------------------------------------------
 
-    recent_messages = (
-        st.session_state.messages[
-            -MAX_HISTORY_MESSAGES:
-        ]
+    context = build_context()
+
+    # --------------------------------------------------------
+    # Main system prompt
+    # --------------------------------------------------------
+
+    system_prompt = (
+        BASE_SYSTEM_PROMPT
+        + "\n"
+        + settings_prompt
+    )
+
+    # --------------------------------------------------------
+    # Build request messages
+    # --------------------------------------------------------
+
+    request_messages = [
+        {
+            "role": "system",
+            "content": system_prompt,
+        }
+    ]
+
+    if context:
+
+        request_messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "Context from the previous conversation:\n\n"
+                    + context
+                ),
+            }
+        )
+
+    request_messages.append(
+        {
+            "role": "user",
+            "content": prompt,
+        }
     )
 
     # ========================================================
@@ -531,13 +750,7 @@ if prompt:
                 stream = client.chat.completions.create(
                     model=model,
 
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": system_prompt,
-                        },
-                        *recent_messages,
-                    ],
+                    messages=request_messages,
 
                     temperature=creativity,
 
@@ -560,7 +773,7 @@ if prompt:
                 st.stop()
 
             # ------------------------------------------------
-            # ENGINEERING PROCESS DISPLAY
+            # Engineering process
             # ------------------------------------------------
 
             with st.expander(
@@ -570,8 +783,12 @@ if prompt:
 
                 thinking_placeholder = st.empty()
 
+                thinking_placeholder.markdown(
+                    "*Analyzing problem...*"
+                )
+
             # ------------------------------------------------
-            # ANSWER DISPLAY
+            # Answer
             # ------------------------------------------------
 
             answer_placeholder = st.empty()
@@ -580,7 +797,7 @@ if prompt:
             answer_text = ""
 
             # ------------------------------------------------
-            # RECEIVE STREAM
+            # Receive stream
             # ------------------------------------------------
 
             for chunk in stream:
@@ -590,9 +807,9 @@ if prompt:
 
                 delta = chunk.choices[0].delta
 
-                # ============================================
-                # REASONING
-                # ============================================
+                # --------------------------------------------
+                # Reasoning
+                # --------------------------------------------
 
                 reasoning = getattr(
                     delta,
@@ -605,12 +822,14 @@ if prompt:
                     reasoning_text += reasoning
 
                     thinking_placeholder.markdown(
-                        clean_latex(reasoning_text)
+                        clean_latex(
+                            reasoning_text
+                        )
                     )
 
-                # ============================================
-                # FINAL ANSWER
-                # ============================================
+                # --------------------------------------------
+                # Final answer
+                # --------------------------------------------
 
                 content = getattr(
                     delta,
@@ -623,11 +842,13 @@ if prompt:
                     answer_text += content
 
                     answer_placeholder.markdown(
-                        clean_latex(answer_text)
+                        clean_latex(
+                            answer_text
+                        )
                     )
 
             # ------------------------------------------------
-            # REASONING FALLBACK
+            # Reasoning fallback
             # ------------------------------------------------
 
             if not reasoning_text:
@@ -637,9 +858,7 @@ if prompt:
                 )
 
             # ------------------------------------------------
-            # SAVE ONLY FINAL ANSWER
-            #
-            # Reasoning is intentionally discarded.
+            # Save ONLY final answer
             # ------------------------------------------------
 
             st.session_state.messages.append(
@@ -655,20 +874,16 @@ if prompt:
 
         else:
 
-            with st.spinner("Thinking..."):
+            with st.spinner(
+                "Thinking..."
+            ):
 
                 try:
 
                     response = client.chat.completions.create(
                         model=model,
 
-                        messages=[
-                            {
-                                "role": "system",
-                                "content": system_prompt,
-                            },
-                            *recent_messages,
-                        ],
+                        messages=request_messages,
 
                         temperature=creativity,
 
@@ -689,7 +904,7 @@ if prompt:
                     st.stop()
 
             # ------------------------------------------------
-            # FINAL ANSWER
+            # Final answer
             # ------------------------------------------------
 
             answer_text = (
@@ -701,7 +916,7 @@ if prompt:
             )
 
             # ------------------------------------------------
-            # REASONING
+            # Reasoning
             # ------------------------------------------------
 
             reasoning_text = getattr(
@@ -711,7 +926,7 @@ if prompt:
             )
 
             # ------------------------------------------------
-            # ENGINEERING PROCESS
+            # Engineering process
             # ------------------------------------------------
 
             with st.expander(
@@ -732,7 +947,7 @@ if prompt:
                     )
 
             # ------------------------------------------------
-            # DISPLAY ANSWER
+            # Display answer
             # ------------------------------------------------
 
             render_markdown(
@@ -740,7 +955,7 @@ if prompt:
             )
 
             # ------------------------------------------------
-            # SAVE ONLY FINAL ANSWER
+            # Save ONLY final answer
             # ------------------------------------------------
 
             st.session_state.messages.append(
@@ -749,3 +964,11 @@ if prompt:
                     "content": answer_text,
                 }
             )
+
+    # ========================================================
+    # UPDATE COMPACT MEMORY
+    # ========================================================
+
+    # This happens AFTER the answer is shown.
+    # The user still sees the complete answer.
+    update_summary()
