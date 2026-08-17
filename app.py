@@ -539,7 +539,6 @@ if prompt:
                                 )
 
                                 if detail:
-
                                     thinking_ui += (
                                         f"> {detail}\n\n"
                                     )
@@ -561,7 +560,6 @@ if prompt:
                 # ====================================================
 
                 if reasoning_finished:
-
                     answer_placeholder.markdown(
                         answer_text
                     )
@@ -596,7 +594,6 @@ if prompt:
                         )
 
                         if detail:
-
                             thinking_ui += (
                                 f"> {detail}\n\n"
                             )
@@ -612,7 +609,6 @@ if prompt:
             # If there is no separate FINAL section, use the
             # model's complete response as the answer.
             if not answer_text:
-
                 answer_text = full_text
 
                 answer_placeholder.markdown(
