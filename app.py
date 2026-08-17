@@ -350,9 +350,10 @@ if prompt:
 
                 temperature=creativity,
 
-                # GPT-OSS reasoning
-                reasoning_effort=reasoning_effort,
-                include_reasoning=True,
+                extra_body={
+                    "reasoning_effort": reasoning_effort,
+                    "include_reasoning": True,
+                },
 
                 stream=True,
             )
