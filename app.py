@@ -23,7 +23,7 @@ client = OpenAI(
 # completion tokens. 8000 gives the assistant enough room
 # for detailed engineering calculations without unnecessarily
 # requesting more than the model supports.
-MAX_COMPLETION_TOKENS = 8000
+MAX_COMPLETION_TOKENS = 4000
 
 # Number of previous messages sent to the model.
 #
