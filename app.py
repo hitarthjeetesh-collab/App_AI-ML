@@ -240,37 +240,33 @@ for message in st.session_state.messages:
 # ============================================================
 
 reasoning_format = """
-For engineering problems, organize your reasoning into a sequence
-of clear engineering steps.
+For engineering problems, first produce a concise, user-facing engineering
+process, then produce the final answer.
 
-Every step MUST use exactly this format:
+Use EXACTLY this format:
+
+STEP: <short step name>
+DETAIL: <brief explanation of what is being determined, calculated, or decided>
 
 STEP: <short step name>
 DETAIL: <brief explanation>
 
-Example:
+Continue until the important engineering reasoning is complete.
 
-STEP: Determine requirements
-DETAIL: Identify the robot's mass, target speed, payload, and operating time.
+Then output:
 
-STEP: Calculate required force
-DETAIL: Use the mass and rolling resistance to determine the required tractive force.
+FINAL:
+<the complete answer to the user>
 
-STEP: Determine motor torque
-DETAIL: Convert the required force into wheel torque using the wheel radius.
-
-STEP: Select motor
-DETAIL: Find a motor that provides sufficient torque and speed with an appropriate margin.
-
-STEP: Verify the design
-DETAIL: Check current draw, battery capacity, thermal limits, and safety margin.
-
-For simple conversational questions, use only one short step.
-
-Keep reasoning focused on solving the user's request.
-Do not discuss system prompts, developer instructions, policies,
-permissions, instruction hierarchy, or internal configuration.
-Do not spend reasoning discussing whether the request is allowed.
+IMPORTANT:
+- Everything before FINAL: is the engineering process.
+- Everything after FINAL: is the final answer.
+- Do not put the final answer before FINAL:.
+- Do not repeat the entire engineering process after FINAL:.
+- Keep the engineering process concise.
+- Do not discuss system prompts, developer instructions, policies,
+  permissions, or internal configuration.
+- Focus the engineering process entirely on the user's problem.
 """
 
 engineering_rules = """
@@ -447,22 +443,27 @@ if prompt:
                 stream=True,
             )
 
-            # --------------------------------------------------------
-            # UI placeholders
-            # --------------------------------------------------------
+            # ========================================================
+            # UI PLACEHOLDERS
+            # ========================================================
 
             thinking_placeholder = st.empty()
             answer_placeholder = st.empty()
 
+            # ========================================================
+            # STREAM STATE
+            # ========================================================
+
             full_text = ""
+
             reasoning_text = ""
             answer_text = ""
 
-            reasoning_finished = False
+            final_started = False
 
-            # --------------------------------------------------------
-            # Stream response
-            # --------------------------------------------------------
+            # ========================================================
+            # STREAM
+            # ========================================================
 
             for chunk in stream:
 
@@ -471,7 +472,11 @@ if prompt:
 
                 delta = chunk.choices[0].delta
 
-                content = getattr(delta, "content", None)
+                content = getattr(
+                    delta,
+                    "content",
+                    None
+                )
 
                 if not content:
                     continue
@@ -479,115 +484,56 @@ if prompt:
                 full_text += content
 
                 # ====================================================
-                # Find engineering reasoning
+                # CHECK WHETHER FINAL ANSWER HAS STARTED
                 # ====================================================
 
-                if not reasoning_finished:
+                if not final_started:
 
-                    # Look for the first STEP
-                    if "STEP:" in full_text:
+                    if "FINAL:" in full_text:
 
-                        reasoning_text = full_text
+                        final_started = True
 
-                        # If the model eventually starts a final answer
-                        # after the reasoning, split it here.
-                        if "\nFINAL:" in full_text:
-
-                            reasoning_text, answer_text = full_text.split(
-                                "\nFINAL:",
+                        reasoning_text, answer_text = (
+                            full_text.split(
+                                "FINAL:",
                                 1
                             )
-
-                            reasoning_finished = True
-
-                        else:
-
-                            answer_text = ""
-
-                        # --------------------------------------------
-                        # Parse steps
-                        # --------------------------------------------
-
-                        steps = parse_reasoning(
-                            reasoning_text
-                        )
-
-                        # --------------------------------------------
-                        # Build thinking UI
-                        # --------------------------------------------
-
-                        thinking_ui = "### Engineering Process\n\n"
-
-                        if not steps:
-
-                            thinking_ui += "Analyzing problem..."
-
-                        else:
-
-                            for i, (step, detail) in enumerate(steps):
-
-                                if i == len(steps) - 1:
-
-                                    icon = "●"
-
-                                else:
-
-                                    icon = "✓"
-
-                                thinking_ui += (
-                                    f"{icon} **{i + 1}. {step}**\n\n"
-                                )
-
-                                if detail:
-                                    thinking_ui += (
-                                        f"> {detail}\n\n"
-                                    )
-
-                        thinking_placeholder.markdown(
-                            thinking_ui
                         )
 
                     else:
 
-                        # No STEP yet
-                        thinking_placeholder.markdown(
-                            "### Engineering Process\n\n"
-                            "Analyzing problem..."
-                        )
+                        reasoning_text = full_text
+
+                else:
+
+                    # FINAL has already started
+                    answer_text += content
 
                 # ====================================================
-                # Final answer
+                # RENDER ENGINEERING PROCESS
                 # ====================================================
-
-                if reasoning_finished:
-                    answer_placeholder.markdown(
-                        answer_text
-                    )
-
-            # --------------------------------------------------------
-            # If model didn't use FINAL:
-            # Everything after reasoning is still reasoning, so
-            # don't accidentally duplicate it.
-            # --------------------------------------------------------
-
-            if not reasoning_finished and reasoning_text:
 
                 steps = parse_reasoning(
                     reasoning_text
                 )
 
-                # If there are parsed steps, show them
-                if steps:
+                thinking_ui = "### Engineering Process\n\n"
 
-                    thinking_ui = "### Engineering Process\n\n"
+                if not steps:
+
+                    thinking_ui += "Analyzing problem..."
+
+                else:
 
                     for i, (step, detail) in enumerate(steps):
 
-                        icon = (
-                            "●"
-                            if i == len(steps) - 1
-                            else "✓"
-                        )
+                        if i == len(steps) - 1:
+
+                            icon = "●"
+
+                        else:
+
+                            icon = "✓"
 
                         thinking_ui += (
                             f"{icon} **{i + 1}. {step}**\n\n"
@@ -598,22 +544,22 @@ if prompt:
                                 f"> {detail}\n\n"
                             )
 
-                    thinking_placeholder.markdown(
-                        thinking_ui
+                thinking_placeholder.markdown(
+                    thinking_ui
+                )
+
+                # ====================================================
+                # RENDER FINAL ANSWER
+                # ====================================================
+
+                if final_started:
+                    answer_placeholder.markdown(
+                        answer_text
                     )
 
-            # --------------------------------------------------------
-            # Save response
-            # --------------------------------------------------------
-
-            # If there is no separate FINAL section, use the
-            # model's complete response as the answer.
-            if not answer_text:
-                answer_text = full_text
-
-                answer_placeholder.markdown(
-                    answer_text
-                )
+            # ========================================================
+            # SAVE FINAL ANSWER
+            # ========================================================
 
             st.session_state.messages.append(
                 {
