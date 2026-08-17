@@ -31,7 +31,7 @@ prompt = st.chat_input("Enter your question here: ")
 
 if prompt:
     system_prompt = f"""
-You are an engineering assistant that helps with engineering tasks such as
+You are an engineering assistant that helps with robotics engineering tasks such as
 brainstorming, design, analysis, calculations, troubleshooting, and optimization.
 
 Use these settings when responding:
