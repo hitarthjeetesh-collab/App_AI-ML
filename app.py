@@ -14,17 +14,66 @@ api_key=os.getenv("GROQ_API_KEY"),
 st.title("Robotics Engineering Assistant")
 with st.sidebar:
     st.subheader("Settings")
-    model = st.selectbox("Select the model to use:", ("openai/gpt-oss-120b", "openai/gpt-oss-20b"))
+
+    # Model & response
+    model = st.selectbox(
+        "Model",
+        ("openai/gpt-oss-120b", "openai/gpt-oss-20b")
+    )
+
     stream_it = st.toggle("Stream response", True)
-    response_length = st.radio("How are you want the ai to respond?", ("Talkative", "Balanced", "Concise"))
-    style = st.radio("What style do you want the ai to respond in?", ("Professional", "Casual", "Friendly"))
-    creativity = st.slider("How creative do you want the ai to be?", 0.0, 1.0, 0.5, 0.01)
-    units = st.radio("What units do you want the ai to use?", ("Metric", "Imperial"))
-    explanation_level = st.radio("How detailed do you want the explanations to be?", ("Basic", "Intermediate", "Advanced"))
-    cost_priority = st.slider("How important is cost to you?", 0.0, 1.0, 0.5, 0.01)
-    performance_priority = st.slider("How important is performance to you?", 0.0, 1.0, 0.5, 0.01)
-    reliability_priority = st.slider("How important is reliability to you?", 0.0, 1.0, 0.5, 0.01)
-    safety_priority = st.slider("How important is safety to you?", 0.0, 1.0, 0.5, 0.01)
+
+    response_length = st.radio(
+        "Response length",
+        ("Talkative", "Balanced", "Concise"),
+        horizontal=True
+    )
+
+    style = st.radio(
+        "Response style",
+        ("Professional", "Casual", "Friendly"),
+        horizontal=True
+    )
+
+    explanation_level = st.radio(
+        "Explanation detail",
+        ("Basic", "Intermediate", "Advanced"),
+        horizontal=True
+    )
+
+    creativity = st.slider(
+        "Creativity",
+        0.0, 1.0, 0.5, 0.01
+    )
+
+    units = st.radio(
+        "Units",
+        ("Metric", "Imperial"),
+        horizontal=True
+    )
+
+    # Engineering priorities
+    st.subheader("Engineering Priorities")
+
+    cost_priority = st.slider(
+        "Cost",
+        0.0, 1.0, 0.5, 0.01
+    )
+
+    performance_priority = st.slider(
+        "Performance",
+        0.0, 1.0, 0.5, 0.01
+    )
+
+    reliability_priority = st.slider(
+        "Reliability",
+        0.0, 1.0, 0.5, 0.01
+    )
+
+    safety_priority = st.slider(
+        "Safety",
+        0.0, 1.0, 0.5, 0.01
+    )
 
 
 prompt = st.chat_input("Enter your question here: ")
@@ -64,6 +113,17 @@ and potential problems, and do not present uncertain estimates as exact facts.
                 stream=True,
             )
             st.write_stream(stream)
+            thinking = st.expander("Thinking", expanded = True).empty
+            answer = st.empty
+            t = a = ""
+            for chunk in stream:
+                d = chunk.choices[0].delta
+                if getattr(d, "reasoning", None):
+                    t += d.reasoning
+                    thinking.markdown(f"*{t}*")
+                if d.context:
+                    a += d.context
+                    answer.markdown(a)
         else:
             with st.spinner("Thinking..."):
                 r = client.chat.completions.create(
