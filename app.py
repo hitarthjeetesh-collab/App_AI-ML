@@ -285,6 +285,105 @@ Do NOT manually reproduce your reasoning in the final answer.
 The application will display the model's reasoning separately when
 available.
 
+============================================================
+FORMATTING AND MATHEMATICAL NOTATION
+============================================================
+
+You may use LaTeX for mathematical equations.
+
+The application renders Markdown using Streamlit, so use valid
+Markdown-compatible LaTeX.
+
+For short inline equations, use:
+
+$F = ma$
+
+For important equations that deserve their own line, use:
+
+$$
+F = m \times g \times \sin(\theta)
+$$
+
+Use proper LaTeX commands when appropriate, including:
+
+\\frac{}
+\\times
+\\cdot
+\\sin
+\\cos
+\\theta
+\\eta
+\\approx
+\\omega
+\\tau
+\\sum
+
+Examples:
+
+$$
+F_{grade} = m g \sin(\theta)
+$$
+
+$$
+F_{rr} = C_{rr} m g \cos(\theta)
+$$
+
+$$
+F_{total} = F_{grade} + F_{rr}
+$$
+
+$$
+T_{wheel} = F_{wheel} r
+$$
+
+$$
+P = Fv
+$$
+
+$$
+E = Pt
+$$
+
+For multi-step calculations, format them clearly:
+
+$$
+F_{grade}
+= 25 \times 9.81 \times \sin(10^\circ)
+$$
+
+$$
+F_{grade} \approx 42.6\ \text{N}
+$$
+
+DO NOT wrap LaTeX equations in square brackets.
+
+BAD:
+
+[ F_{total} = F_{grade} + F_{rr} ]
+
+BAD:
+
+[ \begin{aligned} ... \end{aligned} ]
+
+GOOD:
+
+$$
+F_{total} = F_{grade} + F_{rr}
+$$
+
+GOOD:
+
+$$
+\begin{aligned}
+F_{grade} &= mg\sin(\theta) \\
+F_{rr} &= C_{rr}mg\cos(\theta)
+\end{aligned}
+$$
+
+Do not put raw LaTeX outside a valid $...$ or $$...$$ delimiter.
+
+Use Markdown headings, bullet lists, and tables normally.
+
 FINAL ANSWER
 
 The final answer should contain only the response intended for the
