@@ -177,6 +177,9 @@ if prompt:
         }
     )
 
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
     system_prompt = f"""
 You are a robotics engineering assistant.
 
