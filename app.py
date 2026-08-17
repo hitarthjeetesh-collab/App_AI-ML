@@ -48,18 +48,15 @@ def clean_latex(text):
     Clean common malformed LaTeX formatting produced by models.
 
     Converts:
+
+        \\[ equation \\]
+        \\( equation \\)
         [ equation ]
-        [ multiline equation ]
-        \[ equation \]
-        \( equation \)
 
-    into Streamlit-compatible Markdown LaTeX:
+    into Streamlit-compatible Markdown LaTeX.
 
-        $$
-        equation
-        $$
-
-    Normal Markdown square brackets are left alone whenever possible.
+    Also removes unsupported LaTeX environments such as
+    aligned, align, array, split, gather, and matrix.
     """
 
     if not text:
@@ -69,14 +66,14 @@ def clean_latex(text):
     # 1. NORMALIZE COMMON LATEX DELIMITERS
     # ========================================================
 
-    # \[ ... \]  ->  $$ ... $$
+    # \[ ... \] -> $$ ... $$
     text = re.sub(
         r"\\\[\s*([\s\S]*?)\s*\\\]",
         lambda m: f"\n\n$$\n{m.group(1).strip()}\n$$\n\n",
         text,
     )
 
-    # \( ... \)  ->  $ ... $
+    # \( ... \) -> $ ... $
     text = re.sub(
         r"\\\(\s*(.*?)\s*\\\)",
         lambda m: f"${m.group(1).strip()}$",
@@ -90,11 +87,6 @@ def clean_latex(text):
 
     def replace_square_equation(match):
         equation = match.group(1).strip()
-
-        # ----------------------------------------------------
-        # Determine whether the contents actually look like
-        # mathematics.
-        # ----------------------------------------------------
 
         math_indicators = (
             "=",
@@ -130,11 +122,7 @@ def clean_latex(text):
         if not looks_like_math:
             return match.group(0)
 
-        # ----------------------------------------------------
-        # Don't convert things that look like ordinary
-        # Markdown links.
-        # ----------------------------------------------------
-
+        # Don't convert Markdown links.
         if "http://" in equation or "https://" in equation:
             return match.group(0)
 
@@ -146,12 +134,7 @@ def clean_latex(text):
             "\n\n"
         )
 
-    # --------------------------------------------------------
     # Handle multiline [ ... ] equations.
-    #
-    # DOTALL allows the equation to span multiple lines.
-    # --------------------------------------------------------
-
     text = re.sub(
         r"(?<!\!)\[\s*([\s\S]*?)\s*\]",
         replace_square_equation,
@@ -165,27 +148,39 @@ def clean_latex(text):
     # Remove accidental escaped Markdown dollar signs.
     text = text.replace(r"\$", "$")
 
-    # Convert accidental display delimiters if they survived.
+    # Convert surviving \[ and \] delimiters.
     text = text.replace(r"\[", "$$")
     text = text.replace(r"\]", "$$")
 
     # ========================================================
-    # 4. FIX SOME COMMON LATEX ESCAPING PROBLEMS
+    # 4. REMOVE UNSUPPORTED LATEX ENVIRONMENTS
     # ========================================================
 
-    # Models sometimes output double-escaped LaTeX commands.
-    #
-    # Example:
-    #
-    # \\sin
-    #
-    # instead of:
-    #
-    # \sin
-    #
-    # Only fix common mathematical commands so we don't
-    # blindly alter arbitrary text.
-    #
+    # The model is instructed not to generate these, but this
+    # provides a fallback if it does.
+
+    text = re.sub(
+        r"\\begin\{(?:aligned|align|array|split|gather|matrix|cases)\}",
+        "",
+        text,
+    )
+
+    text = re.sub(
+        r"\\end\{(?:aligned|align|array|split|gather|matrix|cases)\}",
+        "",
+        text,
+    )
+
+    # Remove alignment markers left behind by aligned equations.
+    text = text.replace(r"\\", "\n")
+
+    # Remove LaTeX alignment characters.
+    text = text.replace("&=", "=")
+    text = text.replace("&", "")
+
+    # ========================================================
+    # 5. FIX COMMON LATEX ESCAPING PROBLEMS
+    # ========================================================
 
     latex_commands = [
         "frac",
@@ -208,8 +203,6 @@ def clean_latex(text):
         "int",
         "cdot",
         "text",
-        "begin",
-        "end",
     ]
 
     for command in latex_commands:
@@ -232,9 +225,7 @@ def render_markdown(text):
 
     cleaned = clean_latex(text)
 
-    st.markdown(
-        cleaned
-    )
+    st.markdown(cleaned)
 
 
 # ============================================================
@@ -490,7 +481,7 @@ IMPORTANT:
 Use REAL LaTeX whenever displaying mathematical equations.
 
 The application uses Streamlit's Markdown renderer, which supports
-LaTeX.
+standard LaTeX math.
 
 Use:
 
@@ -504,33 +495,53 @@ $$
 F = ma
 $$
 
-For multi-line equations:
+
+============================================================
+LATEX COMPATIBILITY RULES
+============================================================
+
+IMPORTANT:
+
+Use ONLY simple LaTeX expressions that are reliably supported by
+Streamlit's Markdown renderer.
+
+NEVER use LaTeX environments.
+
+Do NOT use:
+
+- \\begin{{aligned}}
+- \\end{{aligned}}
+- \\begin{{align}}
+- \\end{{align}}
+- \\begin{{array}}
+- \\end{{array}}
+- \\begin{{cases}}
+- \\end{{cases}}
+- \\begin{{split}}
+- \\end{{split}}
+- \\begin{{gather}}
+- \\end{{gather}}
+- \\begin{{matrix}}
+- \\end{{matrix}}
+
+Do NOT use any other \\begin{{...}} or \\end{{...}} environments.
+
+NEVER use a LaTeX environment inside a display equation.
+
+
+============================================================
+DISPLAY EQUATIONS
+============================================================
+
+For a single equation, use:
 
 $$
-\\begin{{aligned}}
-F_{{grade}} &= mg\\sin(\\theta) \\\\
-F_{{rr}} &= C_{{rr}}mg\\cos(\\theta) \\\\
-F_{{total}} &= F_{{grade}} + F_{{rr}}
-\\end{{aligned}}
+F = ma
 $$
 
-Use LaTeX commands such as:
+For multiple equations, use SEPARATE display blocks.
 
-- \\frac{{a}}{{b}}
-- \\sin(\\theta)
-- \\cos(\\theta)
-- \\sqrt{{x}}
-- \\times
-- \\approx
-- \\omega
-- \\theta
-- \\eta
-- \\text{{N}}
-- \\text{{W}}
-- \\text{{kg}}
-- \\text{{m/s}}
-
-Examples:
+GOOD:
 
 $$
 F_{{grade}} = mg\\sin(\\theta)
@@ -544,36 +555,101 @@ $$
 F_{{total}} = F_{{grade}} + F_{{rr}}
 $$
 
-$$
-T_{{wheel}} = F_{{wheel}}r
-$$
-
-$$
-P = Fv
-$$
-
-$$
-E = Pt
-$$
-
-$$
-C = \\frac{{E}}{{V}}
-$$
-
-
-============================================================
-VERY IMPORTANT LATEX RULES
-============================================================
-
-NEVER write mathematical equations using square brackets.
-
 BAD:
 
-[ F_{{total}} = F_{{grade}} + F_{{rr}} ]
+$$
+\\begin{{aligned}}
+F_{{grade}} &= mg\\sin(\\theta) \\\\
+F_{{rr}} &= C_{{rr}}mg\\cos(\\theta) \\\\
+F_{{total}} &= F_{{grade}} + F_{{rr}}
+\\end{{aligned}}
+$$
+
+
+============================================================
+MULTI-STEP CALCULATIONS
+============================================================
+
+When showing a calculation with multiple steps, use a separate
+display equation for each step.
+
+GOOD:
+
+$$
+F_{{grade}} = mg\\sin(10^\\circ)
+$$
+
+$$
+F_{{grade}} = 25 \\times 9.81 \\times \\sin(10^\\circ)
+$$
+
+$$
+F_{{grade}} \\approx 42.5\\ \\text{{N}}
+$$
+
+Do NOT combine multiple equations into an aligned or other
+multi-line LaTeX environment.
+
+
+============================================================
+SUPPORTED LATEX COMMANDS
+============================================================
+
+Common commands that may be used include:
+
+- \\frac{{a}}{{b}}
+- \\sqrt{{x}}
+- \\sin(\\theta)
+- \\cos(\\theta)
+- \\tan(\\theta)
+- \\times
+- \\cdot
+- \\approx
+- \\pm
+- \\omega
+- \\theta
+- \\eta
+- \\mu
+- \\pi
+- \\text{{N}}
+- \\text{{W}}
+- \\text{{kg}}
+- \\text{{m/s}}
+
+Use LaTeX commands normally inside math delimiters.
+
+
+============================================================
+LATEX DELIMITERS
+============================================================
+
+Inline math:
+
+$F = ma$
+
+Display math:
+
+$$
+F = ma
+$$
+
+Do NOT use:
+
+\\[ F = ma \\]
+
+Do NOT use:
+
+\\( F = ma \\)
+
+Do NOT use square brackets as equation delimiters.
 
 BAD:
 
 [ F = ma ]
+
+BAD:
+
+[ F_{{total}} = F_{{grade}} + F_{{rr}} ]
 
 GOOD:
 
@@ -581,46 +657,53 @@ $$
 F_{{total}} = F_{{grade}} + F_{{rr}}
 $$
 
-GOOD:
 
-$$
-F = ma
-$$
+============================================================
+RAW LATEX
+============================================================
 
-Do NOT use square brackets as an alternative to LaTeX delimiters.
-
-Do NOT write raw LaTeX outside a Markdown math delimiter.
+Do NOT output raw LaTeX outside a math delimiter.
 
 Do NOT put equations inside Markdown code blocks.
 
-Do NOT escape the LaTeX backslashes in the final response.
+Do NOT escape LaTeX backslashes in the final response.
 
-The final response should contain actual Markdown-compatible LaTeX.
+The final response should contain Markdown-compatible LaTeX.
 
-For example, output:
+For example:
+
+$$
+T_{{wheel}} = F_{{total}}r
+$$
+
+not:
+
+[ T_{{wheel}} = F_{{total}}r ]
+
+
+============================================================
+ENGINEERING CALCULATIONS
+============================================================
+
+For engineering calculations:
+
+1. State the equation.
+2. Substitute the values.
+3. Give the result.
+4. Include units.
+
+Example:
 
 $$
 F_{{grade}} = mg\\sin(\\theta)
 $$
 
-rather than:
-
-[ F_{{grade}} = mg\\sin(\\theta) ]
-
-For calculations, show the equation first and then substitute
-numbers into it.
-
-Example:
-
 $$
-F_{{grade}} = mg\\sin(10^\\circ)
+F_{{grade}} = 25 \\times 9.81 \\times \\sin(10^\\circ)
 $$
 
 $$
-F_{{grade}}
-=
-25 \\times 9.81 \\times \\sin(10^\\circ)
-\\approx 42.5\\ \\text{{N}}
+F_{{grade}} \\approx 42.5\\ \\text{{N}}
 $$
 
 
@@ -790,7 +873,6 @@ if prompt:
                     f"API request failed: {type(e).__name__}: {e}"
                 )
 
-                # Remove failed user message
                 st.session_state.messages.pop()
 
                 st.stop()
@@ -934,7 +1016,6 @@ if prompt:
                         f"API request failed: {type(e).__name__}: {e}"
                     )
 
-                    # Remove failed user message
                     st.session_state.messages.pop()
 
                     st.stop()
