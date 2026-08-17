@@ -1,6 +1,6 @@
-Engineering AI
+Robotics Engineering AI
 
-An AI engineering assistant that helps users design, troubleshoot, and improve engineering projects.
+An AI engineering assistant that helps users brainstorming, design, analysis, calculations, troubleshooting, and optimization engineering projects.
 
 Users can describe a project, and the AI can help with:
 
