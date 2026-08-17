@@ -426,6 +426,11 @@ Results → Limitations → Practical considerations → Recommendations.
 Follow the user's settings below.
 """
 
+
+# ============================================================
+# CURRENT USER SETTINGS
+# ============================================================
+
 system_prompt += f"""
 SETTINGS
 Response length: {response_length}
@@ -436,34 +441,6 @@ Units: {units}
 Priorities: cost={cost_priority}, performance={performance_priority}, reliability={reliability_priority}, safety={safety_priority}
 Reasoning: {reasoning_effort}
 """
-
-
-# ============================================================
-# CURRENT USER SETTINGS
-# ============================================================
-
-system_prompt += f"""
-
-============================================================
-CURRENT USER SETTINGS
-============================================================
-
-Response length: {response_length}
-Response style: {style}
-Explanation level: {explanation_level}
-Creativity: {creativity}
-Units: {units}
-
-Engineering priorities:
-
-Cost priority: {cost_priority}
-Performance priority: {performance_priority}
-Reliability priority: {reliability_priority}
-Safety priority: {safety_priority}
-
-Reasoning effort: {reasoning_effort}
-"""
-
 
 # ============================================================
 # PAGE TITLE
