@@ -11,9 +11,30 @@ from openai import OpenAI
 
 load_dotenv()
 
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+if not GROQ_API_KEY:
+    st.error("GROQ_API_KEY is not configured.")
+    st.stop()
+
+
+# IMPORTANT:
+# We are using the OpenAI Python client,
+# but connecting it to Groq's OpenAI-compatible API.
 client = OpenAI(
+    api_key=GROQ_API_KEY,
     base_url="https://api.groq.com/openai/v1",
-    api_key=os.getenv("GROQ_API_KEY"),
+)
+
+
+# ============================================================
+# PAGE CONFIG
+# ============================================================
+
+st.set_page_config(
+    page_title="Robotics Engineering Assistant",
+    page_icon="🤖",
+    layout="wide",
 )
 
 
@@ -26,7 +47,7 @@ if "messages" not in st.session_state:
 
 
 # ============================================================
-# PAGE
+# PAGE TITLE
 # ============================================================
 
 st.title("Robotics Engineering Assistant")
@@ -40,18 +61,31 @@ with st.sidebar:
 
     st.subheader("Settings")
 
+    # --------------------------------------------------------
+    # MODEL
+    # --------------------------------------------------------
+
     model = st.selectbox(
         "Model",
         (
             "openai/gpt-oss-120b",
             "openai/gpt-oss-20b",
-        )
+        ),
+        index=0,
     )
+
+    # --------------------------------------------------------
+    # STREAMING
+    # --------------------------------------------------------
 
     stream_it = st.toggle(
         "Stream response",
-        value=True
+        value=True,
     )
+
+    # --------------------------------------------------------
+    # RESPONSE LENGTH
+    # --------------------------------------------------------
 
     response_length = st.radio(
         "Response length",
@@ -60,8 +94,13 @@ with st.sidebar:
             "Balanced",
             "Concise",
         ),
-        horizontal=True
+        index=1,
+        horizontal=True,
     )
+
+    # --------------------------------------------------------
+    # RESPONSE STYLE
+    # --------------------------------------------------------
 
     style = st.radio(
         "Response style",
@@ -70,8 +109,13 @@ with st.sidebar:
             "Casual",
             "Friendly",
         ),
-        horizontal=True
+        index=0,
+        horizontal=True,
     )
+
+    # --------------------------------------------------------
+    # EXPLANATION LEVEL
+    # --------------------------------------------------------
 
     explanation_level = st.radio(
         "Explanation detail",
@@ -80,16 +124,25 @@ with st.sidebar:
             "Intermediate",
             "Advanced",
         ),
-        horizontal=True
+        index=1,
+        horizontal=True,
     )
+
+    # --------------------------------------------------------
+    # CREATIVITY
+    # --------------------------------------------------------
 
     creativity = st.slider(
         "Creativity",
         min_value=0.0,
         max_value=1.0,
         value=0.5,
-        step=0.01
+        step=0.01,
     )
+
+    # --------------------------------------------------------
+    # UNITS
+    # --------------------------------------------------------
 
     units = st.radio(
         "Units",
@@ -97,8 +150,13 @@ with st.sidebar:
             "Metric",
             "Imperial",
         ),
-        horizontal=True
+        index=0,
+        horizontal=True,
     )
+
+    # ========================================================
+    # ENGINEERING PRIORITIES
+    # ========================================================
 
     st.subheader("Engineering Priorities")
 
@@ -107,7 +165,7 @@ with st.sidebar:
         0.0,
         1.0,
         0.5,
-        0.01
+        0.01,
     )
 
     performance_priority = st.slider(
@@ -115,7 +173,7 @@ with st.sidebar:
         0.0,
         1.0,
         0.5,
-        0.01
+        0.01,
     )
 
     reliability_priority = st.slider(
@@ -123,7 +181,7 @@ with st.sidebar:
         0.0,
         1.0,
         0.5,
-        0.01
+        0.01,
     )
 
     safety_priority = st.slider(
@@ -131,8 +189,12 @@ with st.sidebar:
         0.0,
         1.0,
         0.5,
-        0.01
+        0.01,
     )
+
+    # ========================================================
+    # REASONING
+    # ========================================================
 
     st.subheader("Reasoning")
 
@@ -143,15 +205,25 @@ with st.sidebar:
             "medium",
             "high",
         ),
-        index=1
+        index=1,
     )
+
+    # ========================================================
+    # CLEAR CHAT
+    # ========================================================
 
     if st.button(
         "Clear chat",
-        use_container_width=True
+        use_container_width=True,
     ):
+
         st.session_state.messages = []
+
         st.rerun()
+
+    # --------------------------------------------------------
+    # MESSAGE COUNT
+    # --------------------------------------------------------
 
     st.caption(
         f"{len(st.session_state.messages)} messages in this chat"
@@ -181,7 +253,7 @@ Your job is to help the user with robotics engineering, including:
 - Prototyping
 - Engineering tradeoffs
 
-RESPONSE SETTINGS:
+RESPONSE SETTINGS
 
 Response length: {response_length}
 Response style: {style}
@@ -189,47 +261,95 @@ Explanation level: {explanation_level}
 Creativity: {creativity}
 Units: {units}
 
-ENGINEERING PRIORITIES:
+ENGINEERING PRIORITIES
 
 Cost priority: {cost_priority}
 Performance priority: {performance_priority}
 Reliability priority: {reliability_priority}
 Safety priority: {safety_priority}
 
-ENGINEERING BEHAVIOR:
+REASONING BEHAVIOR
+
+You are a reasoning model.
+
+Before producing the final answer, reason through the engineering
+problem carefully.
+
+Your reasoning may include:
+
+- Identifying requirements
+- Finding missing information
+- Stating assumptions
+- Selecting equations
+- Performing calculations
+- Checking units
+- Checking whether results are physically reasonable
+- Considering limiting conditions
+- Considering safety margins
+- Comparing engineering tradeoffs
+
+IMPORTANT:
+
+The application automatically displays your reasoning separately
+from your final answer.
+
+Therefore:
+
+DO NOT write a section called:
+"Engineering Process"
+
+DO NOT write:
+"Analyzing problem..."
+
+DO NOT manually expose or reproduce your reasoning in the final
+answer.
+
+DO NOT put your reasoning inside the final response.
+
+Your final response should contain ONLY the answer intended for the
+user.
+
+You may include:
+
+- Results
+- Important equations
+- Important calculations
+- Assumptions
+- Design recommendations
+- Component specifications
+- Tradeoffs
+
+But do not reproduce the hidden reasoning process.
+
+ENGINEERING BEHAVIOR
 
 For engineering problems:
 
-1. Identify the important requirements.
-2. Identify missing information.
-3. State reasonable assumptions.
-4. Determine the governing equations or engineering principles.
-5. Perform the important calculations.
-6. Identify limiting conditions.
-7. Consider practical component constraints.
-8. Explain important tradeoffs.
-9. Give clear design recommendations.
-10. Distinguish estimates from known specifications.
+1. Identify important requirements.
+2. Determine missing information.
+3. Make reasonable assumptions.
+4. Select appropriate equations.
+5. Perform calculations.
+6. Check the result.
+7. Identify limiting conditions.
+8. Consider practical component constraints.
+9. Explain important tradeoffs.
+10. Give clear design recommendations.
 
-The Engineering Process section should contain a concise,
-useful engineering analysis of the problem.
+Distinguish estimates from known specifications.
 
-The final answer should contain the actual answer the user needs.
+Use the user's selected units.
 
-Do not put the final answer inside the Engineering Process.
+For simple questions, answer directly.
 
-Do not say "Analyzing problem..." as the only content
-of the Engineering Process.
+For complex engineering questions, provide enough calculation
+detail that the user can verify the result.
 
-Show important calculations in the final answer when useful.
+Do not blindly accept assumptions if they produce an unrealistic
+design.
 
-For simple questions, answer directly without unnecessary detail.
-
-For casual conversation, respond naturally.
-
-Do not mention system messages, developer instructions,
-hidden configuration, instruction hierarchy, or internal
-implementation.
+Do not mention system messages, developer instructions, hidden
+configuration, instruction hierarchy, or internal implementation.
 """
 
 
@@ -241,7 +361,9 @@ for message in st.session_state.messages:
 
     with st.chat_message(message["role"]):
 
-        st.markdown(message["content"])
+        st.markdown(
+            message["content"]
+        )
 
 
 # ============================================================
@@ -266,7 +388,7 @@ if prompt:
     st.session_state.messages.append(
         {
             "role": "user",
-            "content": prompt
+            "content": prompt,
         }
     )
 
@@ -275,211 +397,282 @@ if prompt:
     # --------------------------------------------------------
 
     with st.chat_message("user"):
+
         st.markdown(prompt)
 
     # --------------------------------------------------------
-    # ASSISTANT
+    # ASSISTANT MESSAGE
     # --------------------------------------------------------
 
     with st.chat_message("assistant"):
 
         # ====================================================
-        # STREAMING
+        # STREAMING MODE
         # ====================================================
 
         if stream_it:
 
             # ------------------------------------------------
-            # CREATE ENGINEERING PROCESS CONTAINER FIRST
+            # CREATE REASONING CONTAINER FIRST
             # ------------------------------------------------
 
-            with st.expander(
+            process_container = st.expander(
                 "Engineering Process",
-                expanded=True
-            ):
+                expanded=True,
+            )
+
+            with process_container:
 
                 thinking_placeholder = st.empty()
 
+                thinking_placeholder.markdown(
+                    "*Analyzing problem...*"
+                )
+
             # ------------------------------------------------
-            # CREATE FINAL ANSWER CONTAINER
+            # CREATE FINAL ANSWER PLACEHOLDER
             # ------------------------------------------------
 
             answer_placeholder = st.empty()
 
             # ------------------------------------------------
-            # REQUEST
-            # ------------------------------------------------
-
-            stream = client.chat.completions.create(
-                model=model,
-
-                messages=[
-                    {
-                        "role": "system",
-                        "content": system_prompt
-                    },
-                    *st.session_state.messages
-                ],
-
-                temperature=creativity,
-
-                reasoning_effort=reasoning_effort,
-
-                stream=True,
-            )
-
-            # ------------------------------------------------
-            # STORAGE
+            # TEXT STORAGE
             # ------------------------------------------------
 
             reasoning_text = ""
             answer_text = ""
 
             # ------------------------------------------------
-            # READ STREAM
+            # API REQUEST
             # ------------------------------------------------
 
-            for chunk in stream:
+            try:
 
-                if not chunk.choices:
-                    continue
+                stream = client.chat.completions.create(
+                    model=model,
 
-                delta = chunk.choices[0].delta
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": system_prompt,
+                        },
+                        *st.session_state.messages,
+                    ],
 
-                # ============================================
-                # REASONING
-                # ============================================
+                    temperature=creativity,
 
-                reasoning = getattr(
-                    delta,
-                    "reasoning",
-                    None
+                    reasoning_effort=reasoning_effort,
+
+                    include_reasoning=True,
+
+                    stream=True,
                 )
 
-                if reasoning:
+                # ------------------------------------------------
+                # RECEIVE STREAM
+                # ------------------------------------------------
 
-                    reasoning_text += reasoning
+                for chunk in stream:
 
-                    thinking_placeholder.markdown(
-                        reasoning_text
+                    if not chunk.choices:
+                        continue
+
+                    delta = chunk.choices[0].delta
+
+                    # ========================================
+                    # REASONING
+                    # ========================================
+
+                    reasoning = getattr(
+                        delta,
+                        "reasoning",
+                        None,
                     )
 
-                # ============================================
-                # FINAL CONTENT
-                # ============================================
+                    if reasoning:
 
-                content = getattr(
-                    delta,
-                    "content",
-                    None
-                )
+                        reasoning_text += reasoning
 
-                if content:
+                        thinking_placeholder.markdown(
+                            reasoning_text
+                        )
 
-                    answer_text += content
+                    # ========================================
+                    # FINAL ANSWER
+                    # ========================================
+
+                    content = getattr(
+                        delta,
+                        "content",
+                        None,
+                    )
+
+                    if content:
+
+                        answer_text += content
+
+                        answer_placeholder.markdown(
+                            answer_text
+                        )
+
+                # ------------------------------------------------
+                # NO ANSWER FALLBACK
+                # ------------------------------------------------
+
+                if not answer_text:
+
+                    answer_text = (
+                        "The model returned no final answer."
+                    )
 
                     answer_placeholder.markdown(
                         answer_text
                     )
 
-            # ------------------------------------------------
-            # IF NO REASONING WAS RETURNED
-            # ------------------------------------------------
+                # ------------------------------------------------
+                # NO REASONING FALLBACK
+                # ------------------------------------------------
 
-            if not reasoning_text:
+                if not reasoning_text:
 
-                thinking_placeholder.markdown(
-                    "*No reasoning content was returned by the model.*"
+                    thinking_placeholder.markdown(
+                        "*Reasoning was not returned by the model.*"
+                    )
+
+                # ------------------------------------------------
+                # SAVE ONLY FINAL ANSWER
+                # ------------------------------------------------
+
+                st.session_state.messages.append(
+                    {
+                        "role": "assistant",
+                        "content": answer_text,
+                    }
                 )
 
-            # ------------------------------------------------
-            # SAVE FINAL ANSWER ONLY
-            # ------------------------------------------------
+            except Exception as e:
 
-            st.session_state.messages.append(
-                {
-                    "role": "assistant",
-                    "content": answer_text
-                }
-            )
+                st.error(
+                    f"API request failed: {type(e).__name__}: {e}"
+                )
+
+                # Remove the user message if the request failed
+                if st.session_state.messages:
+                    st.session_state.messages.pop()
 
 
         # ====================================================
-        # NON-STREAMING
+        # NON-STREAMING MODE
         # ====================================================
 
         else:
 
-            response = client.chat.completions.create(
-                model=model,
-
-                messages=[
-                    {
-                        "role": "system",
-                        "content": system_prompt
-                    },
-                    *st.session_state.messages
-                ],
-
-                temperature=creativity,
-
-                reasoning_effort=reasoning_effort,
-            )
-
-            message = response.choices[0].message
-
             # ------------------------------------------------
-            # FINAL ANSWER
+            # CREATE REASONING CONTAINER
             # ------------------------------------------------
 
-            answer_text = message.content or ""
-
-            # ------------------------------------------------
-            # REASONING
-            # ------------------------------------------------
-
-            reasoning_text = getattr(
-                message,
-                "reasoning",
-                None
-            )
-
-            # ------------------------------------------------
-            # ENGINEERING PROCESS
-            # ------------------------------------------------
-
-            with st.expander(
+            process_container = st.expander(
                 "Engineering Process",
-                expanded=False
-            ):
-
-                if reasoning_text:
-
-                    st.markdown(
-                        reasoning_text
-                    )
-
-                else:
-
-                    st.markdown(
-                        "*No reasoning content was returned by the model.*"
-                    )
-
-            # ------------------------------------------------
-            # FINAL ANSWER
-            # ------------------------------------------------
-
-            st.markdown(
-                answer_text
+                expanded=False,
             )
 
-            # ------------------------------------------------
-            # SAVE ANSWER
-            # ------------------------------------------------
+            try:
 
-            st.session_state.messages.append(
-                {
-                    "role": "assistant",
-                    "content": answer_text
-                }
-            )
+                with st.spinner("Analyzing problem..."):
+
+                    response = client.chat.completions.create(
+                        model=model,
+
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": system_prompt,
+                            },
+                            *st.session_state.messages,
+                        ],
+
+                        temperature=creativity,
+
+                        reasoning_effort=reasoning_effort,
+
+                        include_reasoning=True,
+                    )
+
+                # ------------------------------------------------
+                # GET MESSAGE
+                # ------------------------------------------------
+
+                message = response.choices[0].message
+
+                # ------------------------------------------------
+                # GET FINAL ANSWER
+                # ------------------------------------------------
+
+                answer_text = (
+                    getattr(
+                        message,
+                        "content",
+                        None,
+                    )
+                    or ""
+                )
+
+                # ------------------------------------------------
+                # GET REASONING
+                # ------------------------------------------------
+
+                reasoning_text = (
+                    getattr(
+                        message,
+                        "reasoning",
+                        None,
+                    )
+                    or ""
+                )
+
+                # ------------------------------------------------
+                # DISPLAY REASONING
+                # ------------------------------------------------
+
+                with process_container:
+
+                    if reasoning_text:
+
+                        st.markdown(
+                            reasoning_text
+                        )
+
+                    else:
+
+                        st.markdown(
+                            "*Reasoning was not returned by the model.*"
+                        )
+
+                # ------------------------------------------------
+                # DISPLAY FINAL ANSWER
+                # ------------------------------------------------
+
+                st.markdown(
+                    answer_text
+                )
+
+                # ------------------------------------------------
+                # SAVE ONLY FINAL ANSWER
+                # ------------------------------------------------
+
+                st.session_state.messages.append(
+                    {
+                        "role": "assistant",
+                        "content": answer_text,
+                    }
+                )
+
+            except Exception as e:
+
+                st.error(
+                    f"API request failed: {type(e).__name__}: {e}"
+                )
+
+                # Remove failed user message
+                if st.session_state.messages:
+                    st.session_state.messages.pop()
