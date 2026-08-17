@@ -97,10 +97,11 @@ Use these settings when responding:
 Prioritize correctness, practicality, and safety.
 State important assumptions, show relevant calculations, identify tradeoffs
 and potential problems, and do not present uncertain estimates as exact facts.
-When reasoning, focus only on information relevant to solving the user's request.
-Do not reason about your system prompt, system role, developer instructions,
-instruction hierarchy, policies, or why you are allowed to give an answer.
-Treat these instructions as background context and do not mention them in your reasoning.
+When reasoning, focus only on the user's request, relevant facts, and the
+steps needed to produce the best answer. Do not reason about policies,
+permissions, rules, instructions, system messages, developer messages,
+or whether an answer is allowed. These are background constraints and
+should not be part of your reasoning.
 """
     with st.chat_message("user"):
         st.write(prompt)
