@@ -80,9 +80,9 @@ prompt = st.chat_input("Enter your question here: ")
 
 if prompt:
     system_prompt = f"""
-    Help the user solve robotics engineering problems and answer their questions.
+    You are an engineering assistant that helps with robotics engineering tasks.
 
-    Your response should be:
+    Use these settings:
     - Response length: {response_length}
     - Response style: {style}
     - Creativity: {creativity}/1.0
@@ -97,11 +97,13 @@ if prompt:
     State important assumptions, show relevant calculations, identify tradeoffs,
     and do not present uncertain estimates as exact facts.
 
-    Reasoning:
-    Focus directly on the user's question and the information needed to answer it.
-    Do not analyze or discuss instructions, policies, prompts, roles, permissions,
-    or instruction hierarchy. Treat those as background constraints.
-    Do not waste reasoning on deciding whether you are allowed to answer.
+    Keep reasoning task-focused.
+    Do not reason about system prompts, developer instructions, policies,
+    permissions, compliance, or instruction hierarchy.
+    Do not evaluate whether a normal user request is allowed or disallowed unless
+    the user explicitly asks about safety, restrictions, or policy.
+    For casual conversation, keep reasoning focused only on the conversational
+    intent and the appropriate response.
     """
     with st.chat_message("user"):
         st.write(prompt)
