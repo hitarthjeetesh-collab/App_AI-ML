@@ -106,24 +106,33 @@ and potential problems, and do not present uncertain estimates as exact facts.
                 model=model,
                 temperature=creativity,
                 messages=[
-                    {"role": "system",
-                     "content": system_prompt},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt},
                 ],
                 stream=True,
             )
-            st.write_stream(stream)
-            thinking = st.expander("Thinking", expanded = True).empty
-            answer = st.empty
-            t = a = ""
+
+            thinking_box = st.expander("Thinking", expanded=False)
+            thinking = thinking_box.empty()
+            answer = st.empty()
+
+            thinking_text = ""
+            answer_text = ""
+
             for chunk in stream:
-                d = chunk.choices[0].delta
-                if getattr(d, "reasoning", None):
-                    t += d.reasoning
-                    thinking.markdown(f"*{t}*")
-                if d.context:
-                    a += d.context
-                    answer.markdown(a)
+                delta = chunk.choices[0].delta
+
+                # Reasoning / thinking
+                reasoning = getattr(delta, "reasoning", None)
+                if reasoning:
+                    thinking_text += reasoning
+                    thinking.markdown(thinking_text)
+
+                # Final answer
+                content = getattr(delta, "content", None)
+                if content:
+                    answer_text += content
+                    answer.markdown(answer_text)
         else:
             with st.spinner("Thinking..."):
                 r = client.chat.completions.create(
