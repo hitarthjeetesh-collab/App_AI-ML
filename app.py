@@ -35,7 +35,7 @@ MAX_COMPLETION_TOKENS = 8000
 #
 # The complete conversation remains stored locally in
 # st.session_state.
-MAX_HISTORY_MESSAGES = 4
+MAX_HISTORY_MESSAGES = 10
 
 
 # ============================================================
