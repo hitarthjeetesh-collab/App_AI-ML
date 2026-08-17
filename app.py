@@ -11,7 +11,7 @@ api_key=os.getenv("GROQ_API_KEY"),
 )
 
 
-st.title("Engineering Assistant")
+st.title("Robotics Engineering Assistant")
 with st.sidebar:
     st.subheader("Settings")
     model = st.selectbox("Select the model to use:", ("llama-3.3-70b-versatile", "llama-3.1-8b-instant"))
