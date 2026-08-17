@@ -14,7 +14,7 @@ api_key=os.getenv("GROQ_API_KEY"),
 st.title("Robotics Engineering Assistant")
 with st.sidebar:
     st.subheader("Settings")
-    model = st.selectbox("Select the model to use:", ("llama-3.3-70b-versatile", "llama-3.1-8b-instant"))
+    model = st.selectbox("Select the model to use:", ("openai/gpt-oss-120b", "openai/gpt-oss-20b"))
     stream_it = st.toggle("Stream response", True)
     response_length = st.radio("How are you want the ai to respond?", ("Talkative", "Balanced", "Concise"))
     style = st.radio("What style do you want the ai to respond in?", ("Professional", "Casual", "Friendly"))
