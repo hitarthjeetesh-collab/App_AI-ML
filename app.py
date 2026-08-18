@@ -1,12 +1,9 @@
 import os
 import re
-import time
-from datetime import datetime, timedelta
-
 import streamlit as st
 from dotenv import load_dotenv
 from openai import OpenAI
-
+import time
 
 # ============================================================
 # CONFIGURATION
@@ -19,70 +16,20 @@ client = OpenAI(
     api_key=os.getenv("GROQ_API_KEY"),
 )
 
-
-# ============================================================
+# ------------------------------------------------------------
 # TOKEN OPTIMIZATION
-# ============================================================
+# ------------------------------------------------------------
 
+# Maximum generated completion.
 MAX_COMPLETION_TOKENS = 3000
+
+# Only the most recent messages are sent as normal conversation
+# history. Engineering context is handled separately.
 MAX_HISTORY_MESSAGES = 4
+
+# Hard limit for engineering memory.
+# This prevents memory from becoming another conversation transcript.
 MAX_ENGINEERING_MEMORY_CHARS = 3000
-
-
-# ============================================================
-# MODEL CONFIGURATION
-# ============================================================
-#
-# IMPORTANT:
-# We do NOT use service_tier="auto".
-#
-# Model selection is handled locally so a simple question does
-# not consume the expensive 120B model.
-#
-# Priority:
-#
-# SIMPLE
-#   -> 20B
-#
-# MEDIUM
-#   -> Qwen 27B
-#
-# COMPLEX
-#   -> 120B
-#
-# If the selected model is rate-limited, the program automatically
-# tries the other models before giving up.
-# ============================================================
-
-MODEL_CHEAP = "openai/gpt-oss-20b"
-MODEL_MEDIUM = "qwen/qwen3.6-27b"
-MODEL_POWERFUL = "openai/gpt-oss-120b"
-
-MODEL_ORDER = [
-    MODEL_CHEAP,
-    MODEL_MEDIUM,
-    MODEL_POWERFUL,
-]
-
-
-# ============================================================
-# SESSION STATE
-# ============================================================
-
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-if "engineering_memory" not in st.session_state:
-    st.session_state.engineering_memory = ""
-
-if "model_cooldowns" not in st.session_state:
-    st.session_state.model_cooldowns = {}
-
-if "model_limit_types" not in st.session_state:
-    st.session_state.model_limit_types = {}
-
-if "last_model_used" not in st.session_state:
-    st.session_state.last_model_used = None
 
 
 # ============================================================
@@ -99,14 +46,12 @@ def get_rate_limit_type(error):
     if (
         "tokens per minute" in error_text
         or "tpm" in error_text
-        or "tokens/minute" in error_text
     ):
         return "TPM"
 
     if (
         "requests per minute" in error_text
         or "rpm" in error_text
-        or "requests/minute" in error_text
     ):
         return "RPM"
 
@@ -114,47 +59,29 @@ def get_rate_limit_type(error):
         "daily" in error_text
         or "per day" in error_text
         or "tokens per day" in error_text
-        or "requests per day" in error_text
     ):
         return "DAILY"
 
     if (
         "rate_limit_exceeded" in error_text
         or "rate limit" in error_text
-        or "429" in error_text
     ):
         return "RATE"
 
     return None
 
 
-def is_rate_limit_error(error):
-    """
-    Return True if the error appears to be a rate-limit error.
-    """
-
-    if get_rate_limit_type(error):
-        return True
-
-    error_text = str(error).lower()
-
-    return (
-        "rate_limit_exceeded" in error_text
-        or "too many requests" in error_text
-        or "429" in error_text
-    )
-
-
 def get_retry_seconds(error):
     """
-    Try to extract a retry duration from the provider error.
+    Try to extract a retry/wait duration from the API error.
+
+    Returns None if Groq did not provide one.
     """
 
     error_text = str(error)
 
     patterns = [
         r"try again in\s*(\d+(?:\.\d+)?)\s*s",
-        r"try again in\s*(\d+(?:\.\d+)?)\s*seconds?",
         r"retry after\s*(\d+(?:\.\d+)?)\s*seconds?",
         r"retry[- ]after[:\s]+(\d+(?:\.\d+)?)",
         r"in\s*(\d+(?:\.\d+)?)\s*seconds?",
@@ -171,9 +98,14 @@ def get_retry_seconds(error):
         if match:
 
             try:
+
                 return max(
                     1,
-                    int(float(match.group(1))),
+                    int(
+                        float(
+                            match.group(1)
+                        )
+                    ),
                 )
 
             except ValueError:
@@ -182,438 +114,60 @@ def get_retry_seconds(error):
     return None
 
 
-def set_model_cooldown(model, error):
+def handle_rate_limit_error(error):
     """
-    Put a model into a temporary cooldown after a rate limit.
+    Create a user-friendly rate-limit message and
+    establish a temporary cooldown.
     """
 
     limit_type = get_rate_limit_type(error)
+
     retry_seconds = get_retry_seconds(error)
+
+    # --------------------------------------------------------
+    # If Groq supplied a retry time, trust it.
+    # --------------------------------------------------------
 
     if retry_seconds is not None:
 
         cooldown = retry_seconds
 
-    elif limit_type in ("TPM", "RPM", "RATE"):
+    # --------------------------------------------------------
+    # Otherwise use a reasonable fallback.
+    # --------------------------------------------------------
+
+    elif limit_type == "TPM":
 
         cooldown = 60
 
-    elif limit_type == "DAILY":
+    elif limit_type == "RPM":
 
-        # We do not know the provider's exact reset time.
-        # Keep this model unavailable for the rest of the day.
-        now = datetime.now()
+        cooldown = 60
 
-        tomorrow = (
-            now + timedelta(days=1)
-        ).replace(
-            hour=0,
-            minute=0,
-            second=5,
-            microsecond=0,
-        )
+    elif limit_type == "RATE":
 
-        cooldown = max(
-            60,
-            int(
-                (
-                    tomorrow - now
-                ).total_seconds()
-            ),
-        )
+        cooldown = 60
 
     else:
 
         cooldown = 60
 
-    st.session_state.model_cooldowns[model] = (
+    st.session_state.rate_limit_until = (
         time.time() + cooldown
     )
 
-    st.session_state.model_limit_types[model] = (
+    st.session_state.rate_limit_type = (
         limit_type or "RATE"
     )
 
     return cooldown
 
 
-def get_model_remaining(model):
-    """
-    Return remaining cooldown seconds for a model.
-    """
-
-    until = st.session_state.model_cooldowns.get(
-        model,
-        0,
-    )
-
-    remaining = max(
-        0,
-        int(until - time.time()),
-    )
-
-    if remaining <= 0:
-
-        st.session_state.model_cooldowns.pop(
-            model,
-            None,
-        )
-
-        st.session_state.model_limit_types.pop(
-            model,
-            None,
-        )
-
-    return remaining
-
-
-def is_model_available(model):
-    return get_model_remaining(model) <= 0
-
-
-def get_available_models():
-    """
-    Return models that are not currently rate-limited.
-    """
-
-    return [
-        model
-        for model in MODEL_ORDER
-        if is_model_available(model)
-    ]
-
-
-# ============================================================
-# AUTOMATIC MODEL SELECTION
-# ============================================================
-
-def classify_question(prompt):
-    """
-    Decide how much model capability the question needs.
-
-    This is deliberately LOCAL.
-
-    No API call is made just to decide which model to use.
-    That means simple questions do not waste tokens or money.
-    """
-
-    text = prompt.lower().strip()
-
-    # --------------------------------------------------------
-    # Very simple questions
-    # --------------------------------------------------------
-
-    simple_patterns = [
-        r"^what is\b",
-        r"^what's\b",
-        r"^who is\b",
-        r"^what does\b",
-        r"^define\b",
-        r"^meaning of\b",
-        r"^explain\b",
-        r"^how do i\b",
-        r"^how to\b",
-        r"^why is\b",
-        r"^why does\b",
-        r"^is .+ better than .+$",
-        r"^.+ vs .+$",
-        r"^compare .+$",
-    ]
-
-    simple_keywords = [
-        "what is",
-        "what's",
-        "define",
-        "meaning",
-        "how do i",
-        "how to",
-        "why is",
-        "why does",
-    ]
-
-    # --------------------------------------------------------
-    # Complex engineering indicators
-    # --------------------------------------------------------
-
-    complex_keywords = [
-        "design",
-        "calculate",
-        "calculation",
-        "equation",
-        "derive",
-        "dimension",
-        "sizing",
-        "size",
-        "optimize",
-        "optimization",
-        "motor",
-        "torque",
-        "power",
-        "battery",
-        "bms",
-        "gearbox",
-        "drivetrain",
-        "actuator",
-        "robot",
-        "robotics",
-        "kinematics",
-        "dynamics",
-        "control",
-        "pid",
-        "trajectory",
-        "simulation",
-        "thermal",
-        "heat",
-        "stress",
-        "strain",
-        "load",
-        "force",
-        "moment",
-        "mechanical",
-        "electrical",
-        "circuit",
-        "voltage",
-        "current",
-        "efficiency",
-        "traction",
-        "acceleration",
-        "autonomous",
-        "architecture",
-        "system design",
-        "component selection",
-        "parts list",
-        "bill of materials",
-        "bom",
-        "troubleshoot",
-        "debug",
-        "code",
-        "implement",
-        "algorithm",
-    ]
-
-    # --------------------------------------------------------
-    # Very long prompts are usually more demanding.
-    # --------------------------------------------------------
-
-    word_count = len(text.split())
-
-    complex_score = 0
-
-    for keyword in complex_keywords:
-
-        if keyword in text:
-            complex_score += 1
-
-    # Numbers + engineering units are strong indicators.
-    engineering_units = [
-        "kg",
-        "nm",
-        "rpm",
-        "rpm",
-        "w",
-        "kw",
-        "v",
-        "amp",
-        "a",
-        "ah",
-        "wh",
-        "mm",
-        "cm",
-        "m/s",
-        "km/h",
-        "hz",
-        "°",
-        "deg",
-        "newton",
-        "joule",
-    ]
-
-    for unit in engineering_units:
-
-        if unit in text:
-            complex_score += 1
-
-    # Equations / calculations.
-    if any(
-        symbol in text
-        for symbol in [
-            "=",
-            "+",
-            "-",
-            "*",
-            "/",
-            "^",
-            "sin",
-            "cos",
-            "sqrt",
-        ]
-    ):
-        complex_score += 1
-
-    if word_count > 120:
-        complex_score += 2
-
-    if word_count > 250:
-        complex_score += 3
-
-    # --------------------------------------------------------
-    # Explicit simple questions get the cheap model unless
-    # they clearly contain substantial engineering work.
-    # --------------------------------------------------------
-
-    looks_simple = any(
-        re.search(pattern, text)
-        for pattern in simple_patterns
-    )
-
-    if (
-        looks_simple
-        and complex_score <= 2
-        and word_count < 80
-    ):
-        return "simple"
-
-    # --------------------------------------------------------
-    # Complex engineering work.
-    # --------------------------------------------------------
-
-    if complex_score >= 4 or word_count >= 180:
-        return "complex"
-
-    return "medium"
-
-
-def get_preferred_model(prompt):
-    """
-    Select the model based on the question difficulty.
-    """
-
-    difficulty = classify_question(prompt)
-
-    if difficulty == "simple":
-        return MODEL_CHEAP
-
-    if difficulty == "medium":
-        return MODEL_MEDIUM
-
-    return MODEL_POWERFUL
-
-
-def get_model_fallback_order(prompt):
-    """
-    Return models in the order they should be attempted.
-
-    The preferred model is first.
-
-    If it is rate-limited, cheaper/other models are tried.
-    """
-
-    preferred = get_preferred_model(prompt)
-
-    order = [
-        preferred,
-        MODEL_CHEAP,
-        MODEL_MEDIUM,
-        MODEL_POWERFUL,
-    ]
-
-    # Remove duplicates while preserving order.
-    result = []
-
-    for model in order:
-
-        if model not in result:
-            result.append(model)
-
-    return result
-
-
-# ============================================================
-# USER-FRIENDLY MODEL NAME
-# ============================================================
-
-def model_display_name(model):
-
-    names = {
-        MODEL_CHEAP: "GPT-OSS 20B",
-        MODEL_MEDIUM: "Qwen 3.6 27B",
-        MODEL_POWERFUL: "GPT-OSS 120B",
-    }
-
-    return names.get(
-        model,
-        model,
-    )
-
-
-# ============================================================
-# API ERROR DISPLAY
-# ============================================================
-
-def show_all_models_unavailable():
-
-    model_info = []
-
-    shortest_wait = None
-
-    for model in MODEL_ORDER:
-
-        remaining = get_model_remaining(model)
-
-        limit_type = (
-            st.session_state.model_limit_types.get(
-                model,
-                "RATE",
-            )
-        )
-
-        if remaining > 0:
-
-            model_info.append(
-                (
-                    model,
-                    remaining,
-                    limit_type,
-                )
-            )
-
-            if (
-                shortest_wait is None
-                or remaining < shortest_wait
-            ):
-                shortest_wait = remaining
-
-    if shortest_wait is not None:
-
-        minutes = shortest_wait // 60
-        seconds = shortest_wait % 60
-
-        if minutes > 0:
-
-            wait_text = (
-                f"{minutes}m {seconds:02d}s"
-            )
-
-        else:
-
-            wait_text = f"{seconds}s"
-
-        st.warning(
-            f"**All available models are temporarily unavailable.**\n\n"
-            f"The request could not be processed because the "
-            f"configured models have reached their current usage "
-            f"limits.\n\n"
-            f"The next model should become available in "
-            f"**{wait_text}**. Your message has not been lost."
-        )
-
-    else:
-
-        st.error(
-            "**The request could not be processed.**\n\n"
-            "None of the configured models were available. "
-            "Please try again later."
-        )
+if "rate_limit_until" not in st.session_state:
+    st.session_state.rate_limit_until = 0
+
+if "rate_limit_type" not in st.session_state:
+    st.session_state.rate_limit_type = None
 
 
 # ============================================================
@@ -628,19 +182,33 @@ st.set_page_config(
 
 
 # ============================================================
+# SESSION STATE
+# ============================================================
+
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+if "engineering_memory" not in st.session_state:
+    st.session_state.engineering_memory = ""
+
+
+# ============================================================
 # LATEX CLEANING
 # ============================================================
 
 def clean_latex(text):
+    """
+    Clean common LaTeX formatting problems without
+    changing normal Markdown.
+    """
 
     if not text:
         return text
 
-    text = text.replace(
-        r"\$",
-        "$",
-    )
+    # Normalize escaped dollar signs.
+    text = text.replace(r"\$", "$")
 
+    # Fix malformed [4pt] endings.
     text = re.sub(
         r"(?:\\+|\$+)?\s*\$?\s*4pt\s*\]",
         r"\\\\",
@@ -648,6 +216,7 @@ def clean_latex(text):
         flags=re.IGNORECASE,
     )
 
+    # Fix double-escaped common LaTeX commands.
     commands = [
         "frac",
         "sqrt",
@@ -683,6 +252,7 @@ def clean_latex(text):
             f"\\{command}",
         )
 
+    # Convert \[ ... \] to $$ ... $$.
     text = re.sub(
         r"\\\[\s*([\s\S]*?)\s*\\\]",
         lambda match: (
@@ -693,6 +263,7 @@ def clean_latex(text):
         text,
     )
 
+    # Convert \( ... \) to $ ... $.
     text = re.sub(
         r"\\\(\s*([\s\S]*?)\s*\\\)",
         lambda match: (
@@ -703,6 +274,7 @@ def clean_latex(text):
         text,
     )
 
+    # Wrap aligned environments.
     aligned_pattern = re.compile(
         r"(?<!\$)"
         r"(\\begin\{aligned\}[\s\S]*?\\end\{aligned\})"
@@ -727,12 +299,14 @@ def clean_latex(text):
         text,
     )
 
+    # Fix malformed aligned spacing.
     text = re.sub(
         r"\\{2,}\s*\[4pt\]",
         r"\\\\",
         text,
     )
 
+    # Remove excessive blank lines.
     text = re.sub(
         r"\n{4,}",
         "\n\n\n",
@@ -757,12 +331,27 @@ def render_markdown(text):
 # ============================================================
 
 def clean_memory(memory):
+    """
+    Keep engineering memory compact.
+
+    Memory should contain facts, requirements, decisions,
+    calculated results, assumptions, and unresolved items.
+
+    It should NOT contain:
+    - explanations
+    - reasoning
+    - duplicated requirements
+    - full answers
+    - headings describing the answer
+    - conversational filler
+    """
 
     if not memory:
         return ""
 
     memory = memory.strip()
 
+    # Remove accidental memory delimiters.
     memory = memory.replace(
         "<memory>",
         "",
@@ -771,21 +360,22 @@ def clean_memory(memory):
         "",
     )
 
+    # Remove excessive blank lines.
     memory = re.sub(
         r"\n{3,}",
         "\n\n",
         memory,
     )
 
+    # Hard character limit.
     if len(memory) > MAX_ENGINEERING_MEMORY_CHARS:
 
         memory = memory[
             :MAX_ENGINEERING_MEMORY_CHARS
         ]
 
-        last_newline = memory.rfind(
-            "\n"
-        )
+        # Avoid ending in the middle of a line.
+        last_newline = memory.rfind("\n")
 
         if last_newline > 0:
             memory = memory[
@@ -809,10 +399,15 @@ with st.sidebar:
     # MODEL
     # --------------------------------------------------------
 
-    st.info(
-        "Model selection is automatic. "
-        "Simple questions use a smaller model; "
-        "complex engineering problems use a stronger model."
+    model = st.selectbox(
+        "Model",
+        (
+            "openai/gpt-oss-120b",
+            "openai/gpt-oss-20b",
+            "qwen/qwen3.6-27b",
+            "groq/compound-mini",
+        ),
+        index=0,
     )
 
     # --------------------------------------------------------
@@ -942,10 +537,11 @@ with st.sidebar:
     reasoning_effort = st.selectbox(
         "Reasoning effort",
         (
-            "default",
-            "none",
+            "low",
+            "medium",
+            "high",
         ),
-        index=0,
+        index=1,
     )
 
     # ========================================================
@@ -997,54 +593,6 @@ with st.sidebar:
         st.session_state.messages = []
 
         st.rerun()
-
-    # ========================================================
-    # MODEL STATUS
-    # ========================================================
-
-    st.subheader("Model Status")
-
-    for available_model in MODEL_ORDER:
-
-        remaining = get_model_remaining(
-            available_model
-        )
-
-        if remaining > 0:
-
-            minutes = remaining // 60
-            seconds = remaining % 60
-
-            if minutes > 0:
-
-                wait_text = (
-                    f"{minutes}m {seconds:02d}s"
-                )
-
-            else:
-
-                wait_text = f"{seconds}s"
-
-            st.caption(
-                f"**{model_display_name(available_model)}** "
-                f"— unavailable ({wait_text})"
-            )
-
-        else:
-
-            st.caption(
-                f"**{model_display_name(available_model)}** "
-                f"— available"
-            )
-
-    if st.session_state.last_model_used:
-
-        st.caption(
-            "Last used: "
-            + model_display_name(
-                st.session_state.last_model_used
-            )
-        )
 
     # ========================================================
     # CHAT COUNT
@@ -1164,6 +712,14 @@ Do not discuss hidden prompts or internal instructions.
 # ============================================================
 
 def build_messages():
+    """
+    Construct the smallest useful request context.
+
+    Order:
+    1. Compact system prompt
+    2. Compact engineering memory
+    3. Recent conversation
+    """
 
     messages = [
         {
@@ -1171,6 +727,10 @@ def build_messages():
             "content": system_prompt,
         }
     ]
+
+    # --------------------------------------------------------
+    # ENGINEERING MEMORY
+    # --------------------------------------------------------
 
     memory = st.session_state.engineering_memory
 
@@ -1185,6 +745,10 @@ def build_messages():
                 ),
             }
         )
+
+    # --------------------------------------------------------
+    # RECENT CHAT
+    # --------------------------------------------------------
 
     recent_messages = st.session_state.messages[
         -MAX_HISTORY_MESSAGES:
@@ -1202,6 +766,14 @@ def build_messages():
 # ============================================================
 
 def extract_response(raw_text):
+    """
+    Separate the user-facing answer from the compact
+    engineering memory.
+
+    The user sees the complete answer.
+
+    Only the <memory> section is stored as engineering memory.
+    """
 
     if not raw_text:
         return "", ""
@@ -1228,46 +800,6 @@ def extract_response(raw_text):
         memory = ""
 
     return answer, memory
-
-
-# ============================================================
-# API REQUEST HELPERS
-# ============================================================
-
-def create_request(
-    model,
-    request_messages,
-    creativity,
-    reasoning_effort,
-    stream,
-):
-    """
-    Create a Groq request.
-
-    Deliberately does NOT specify service_tier="auto".
-    Groq rejected that option for the user's organization.
-    """
-
-    kwargs = {
-        "model": model,
-        "messages": request_messages,
-        "temperature": creativity,
-        "reasoning_effort": reasoning_effort,
-        "max_completion_tokens": MAX_COMPLETION_TOKENS,
-        "stream": stream,
-    }
-
-    # gpt-oss models support separate reasoning output.
-    # This keeps the existing Engineering Process box.
-    if model in (
-        MODEL_CHEAP,
-        MODEL_POWERFUL,
-    ):
-        kwargs["include_reasoning"] = True
-
-    return client.chat.completions.create(
-        **kwargs
-    )
 
 
 # ============================================================
@@ -1298,15 +830,81 @@ for message in st.session_state.messages:
 # RATE LIMIT STATUS
 # ============================================================
 
-available_models = get_available_models()
+remaining = max(
+    0,
+    int(
+        st.session_state.rate_limit_until
+        - time.time()
+    ),
+)
 
-if not available_models:
+rate_limited = remaining > 0
 
-    show_all_models_unavailable()
+if rate_limited:
 
-    # Refresh countdown.
+    minutes = remaining // 60
+    seconds = remaining % 60
+
+    if minutes > 0:
+
+        time_text = (
+            f"{minutes}m {seconds:02d}s"
+        )
+
+    else:
+
+        time_text = (
+            f"{seconds}s"
+        )
+
+    limit_type = (
+        st.session_state.rate_limit_type
+        or "RATE"
+    )
+
+    if limit_type == "TPM":
+
+        st.warning(
+            f"**Temporary token limit reached**\n\n"
+            f"This model has reached its tokens-per-minute "
+            f"limit. Your chat is safe and nothing was lost.\n\n"
+            f"Try again in **{time_text}**."
+        )
+
+    elif limit_type == "RPM":
+
+        st.warning(
+            f"**Temporary request limit reached**\n\n"
+            f"Too many requests were sent to this model.\n\n"
+            f"Try again in **{time_text}**."
+        )
+
+    elif limit_type == "DAILY":
+
+        st.error(
+            "**Daily model limit reached.**\n\n"
+            "This limit cannot be fixed by waiting a few seconds. "
+            "You will need to wait until the provider resets the "
+            "limit or use another available model."
+        )
+
+    else:
+
+        st.warning(
+            f"**Temporary usage limit reached**\n\n"
+            f"Please wait **{time_text}** before sending another "
+            f"message."
+        )
+
+    # Force Streamlit to refresh the countdown.
     time.sleep(1)
     st.rerun()
+
+else:
+
+    # Clear expired state.
+    st.session_state.rate_limit_until = 0
+    st.session_state.rate_limit_type = None
 
 
 # ============================================================
@@ -1349,435 +947,372 @@ if prompt:
 
     request_messages = build_messages()
 
-    # --------------------------------------------------------
-    # AUTOMATIC MODEL SELECTION
-    # --------------------------------------------------------
-
-    difficulty = classify_question(
-        prompt
-    )
-
-    preferred_model = get_preferred_model(
-        prompt
-    )
-
-    model_attempts = (
-        get_model_fallback_order(
-            prompt
-        )
-    )
-
-    # Only try models that are currently available.
-    model_attempts = [
-        model
-        for model in model_attempts
-        if is_model_available(model)
-    ]
-
     # ========================================================
     # ASSISTANT
     # ========================================================
 
     with st.chat_message("assistant"):
 
-        successful_response = False
-
-        answer_text = ""
-        new_memory = ""
-        reasoning_text = ""
-
         # ====================================================
-        # TRY MODELS
+        # STREAMING
         # ====================================================
 
-        for model_index, current_model in enumerate(
-            model_attempts
-        ):
+        if stream_it:
 
-            # ------------------------------------------------
-            # STREAMING
-            # ------------------------------------------------
+            try:
 
-            if stream_it:
+                stream = client.chat.completions.create(
+                    model=model,
+                    messages=request_messages,
+                    temperature=creativity,
+                    reasoning_effort=reasoning_effort,
+                    max_completion_tokens=MAX_COMPLETION_TOKENS,
+                    stream=True,
+                )
 
-                try:
+            except Exception as e:
 
-                    stream = create_request(
-                        model=current_model,
-                        request_messages=request_messages,
-                        creativity=creativity,
-                        reasoning_effort=reasoning_effort,
-                        stream=True,
+                # --------------------------------------------
+                # RATE LIMIT
+                # --------------------------------------------
+
+                if (
+                    get_rate_limit_type(e)
+                    is not None
+                ):
+
+                    cooldown = handle_rate_limit_error(e)
+
+                    limit_type = (
+                        st.session_state.rate_limit_type
+                        or "RATE"
                     )
 
-                except Exception as e:
+                    if limit_type == "TPM":
 
-                    if is_rate_limit_error(e):
-
-                        set_model_cooldown(
-                            current_model,
-                            e,
+                        st.warning(
+                            f"**Temporary token limit reached.**\n\n"
+                            f"This model has reached its tokens-per-minute "
+                            f"limit. Your message was not lost.\n\n"
+                            f"Please try again in approximately "
+                            f"**{cooldown} seconds**."
                         )
 
-                        continue
+                    elif limit_type == "RPM":
 
-                    # If the selected model has some other
-                    # configuration/API error, try another
-                    # configured model as well.
-                    if model_index < len(
-                        model_attempts
-                    ) - 1:
+                        st.warning(
+                            f"**Temporary request limit reached.**\n\n"
+                            f"Too many requests were sent to this model.\n\n"
+                            f"Please try again in approximately "
+                            f"**{cooldown} seconds**."
+                        )
 
-                        continue
+                    elif limit_type == "DAILY":
+
+                        st.error(
+                            "**Daily model limit reached.**\n\n"
+                            "This model has reached its daily usage "
+                            "limit. Please use another model or wait "
+                            "for the provider's daily reset."
+                        )
+
+                    else:
+
+                        st.warning(
+                            f"**Temporary usage limit reached.**\n\n"
+                            f"Please try again in approximately "
+                            f"**{cooldown} seconds**."
+                        )
+
+                else:
 
                     st.error(
                         f"API request failed: "
                         f"{type(e).__name__}: {e}"
                     )
 
-                    st.session_state.messages.pop()
+                st.session_state.messages.pop()
 
-                    st.stop()
+                st.stop()
 
-                # ------------------------------------------------
-                # ENGINEERING PROCESS
-                # ------------------------------------------------
+            # ------------------------------------------------
+            # ENGINEERING PROCESS
+            # ------------------------------------------------
 
-                with st.expander(
-                    "Engineering Process",
-                    expanded=True,
-                ):
+            with st.expander(
+                "Engineering Process",
+                expanded=True,
+            ):
 
-                    thinking_placeholder = st.empty()
+                thinking_placeholder = st.empty()
 
-                # ------------------------------------------------
-                # ANSWER
-                # ------------------------------------------------
+            # ------------------------------------------------
+            # ANSWER
+            # ------------------------------------------------
 
-                answer_placeholder = st.empty()
+            answer_placeholder = st.empty()
 
-                reasoning_text = ""
-                raw_answer_text = ""
+            reasoning_text = ""
+            raw_answer_text = ""
 
-                stream_failed = False
+            # ------------------------------------------------
+            # STREAM
+            # ------------------------------------------------
 
-                # ------------------------------------------------
-                # STREAM
-                # ------------------------------------------------
+            for chunk in stream:
 
-                try:
-
-                    for chunk in stream:
-
-                        if not chunk.choices:
-                            continue
-
-                        delta = (
-                            chunk.choices[0].delta
-                        )
-
-                        # ========================================
-                        # REASONING
-                        # ========================================
-
-                        reasoning = getattr(
-                            delta,
-                            "reasoning",
-                            None,
-                        )
-
-                        if not reasoning:
-
-                            reasoning = getattr(
-                                delta,
-                                "reasoning_content",
-                                None,
-                            )
-
-                        if reasoning:
-
-                            reasoning_text += (
-                                reasoning
-                            )
-
-                            thinking_placeholder.markdown(
-                                clean_latex(
-                                    reasoning_text
-                                )
-                            )
-
-                        # ========================================
-                        # FINAL RESPONSE
-                        # ========================================
-
-                        content = getattr(
-                            delta,
-                            "content",
-                            None,
-                        )
-
-                        if content:
-
-                            raw_answer_text += (
-                                content
-                            )
-
-                            visible_answer, _ = (
-                                extract_response(
-                                    raw_answer_text
-                                )
-                            )
-
-                            answer_placeholder.markdown(
-                                clean_latex(
-                                    visible_answer
-                                )
-                            )
-
-                except Exception as e:
-
-                    stream_failed = True
-
-                    if is_rate_limit_error(e):
-
-                        set_model_cooldown(
-                            current_model,
-                            e,
-                        )
-
-                    else:
-
-                        st.error(
-                            f"API request failed: "
-                            f"{type(e).__name__}: {e}"
-                        )
-
-                        st.session_state.messages.pop()
-
-                        st.stop()
-
-                # ------------------------------------------------
-                # If a model became rate-limited while streaming,
-                # try another model.
-                # ------------------------------------------------
-
-                if stream_failed:
-
-                    answer_placeholder.empty()
-                    thinking_placeholder.empty()
-
+                if not chunk.choices:
                     continue
 
-                # ------------------------------------------------
-                # FINAL EXTRACTION
-                # ------------------------------------------------
+                delta = chunk.choices[0].delta
 
-                answer_text, new_memory = (
-                    extract_response(
-                        raw_answer_text
-                    )
-                )
+                # ============================================
+                # REASONING
+                # ============================================
 
-                # ------------------------------------------------
-                # UPDATE MEMORY
-                # ------------------------------------------------
-
-                if new_memory:
-
-                    st.session_state.engineering_memory = (
-                        new_memory
-                    )
-
-                # ------------------------------------------------
-                # REASONING FALLBACK
-                # ------------------------------------------------
-
-                if not reasoning_text:
-
-                    thinking_placeholder.markdown(
-                        "*No separate reasoning was returned by the model.*"
-                    )
-
-                # ------------------------------------------------
-                # SAVE MODEL
-                # ------------------------------------------------
-
-                st.session_state.last_model_used = (
-                    current_model
-                )
-
-                successful_response = True
-
-                break
-
-            # ====================================================
-            # NON-STREAMING
-            # ====================================================
-
-            else:
-
-                with st.spinner(
-                    "Thinking..."
-                ):
-
-                    try:
-
-                        response = create_request(
-                            model=current_model,
-                            request_messages=request_messages,
-                            creativity=creativity,
-                            reasoning_effort=reasoning_effort,
-                            stream=False,
-                        )
-
-                    except Exception as e:
-
-                        if is_rate_limit_error(e):
-
-                            set_model_cooldown(
-                                current_model,
-                                e,
-                            )
-
-                            continue
-
-                        if model_index < len(
-                            model_attempts
-                        ) - 1:
-
-                            continue
-
-                        st.error(
-                            f"API request failed: "
-                            f"{type(e).__name__}: {e}"
-                        )
-
-                        st.session_state.messages.pop()
-
-                        st.stop()
-
-                # ------------------------------------------------
-                # RAW RESPONSE
-                # ------------------------------------------------
-
-                raw_response = (
-                    response
-                    .choices[0]
-                    .message
-                    .content
-                    or ""
-                )
-
-                # ------------------------------------------------
-                # EXTRACT ANSWER + MEMORY
-                # ------------------------------------------------
-
-                answer_text, new_memory = (
-                    extract_response(
-                        raw_response
-                    )
-                )
-
-                # ------------------------------------------------
-                # UPDATE MEMORY
-                # ------------------------------------------------
-
-                if new_memory:
-
-                    st.session_state.engineering_memory = (
-                        new_memory
-                    )
-
-                # ------------------------------------------------
-                # GET REASONING
-                # ------------------------------------------------
-
-                reasoning_text = getattr(
-                    response.choices[0].message,
+                reasoning = getattr(
+                    delta,
                     "reasoning",
                     None,
                 )
 
-                if not reasoning_text:
+                if reasoning:
 
-                    reasoning_text = getattr(
-                        response.choices[0].message,
-                        "reasoning_content",
-                        None,
-                    )
+                    reasoning_text += reasoning
 
-                # ------------------------------------------------
-                # ENGINEERING PROCESS
-                # ------------------------------------------------
-
-                with st.expander(
-                    "Engineering Process",
-                    expanded=False,
-                ):
-
-                    if reasoning_text:
-
-                        render_markdown(
+                    thinking_placeholder.markdown(
+                        clean_latex(
                             reasoning_text
                         )
+                    )
+
+                # ============================================
+                # FINAL RESPONSE
+                # ============================================
+
+                content = getattr(
+                    delta,
+                    "content",
+                    None,
+                )
+
+                if content:
+
+                    raw_answer_text += content
+
+                    # Do not show memory block.
+                    visible_answer, _ = extract_response(
+                        raw_answer_text
+                    )
+
+                    answer_placeholder.markdown(
+                        clean_latex(
+                            visible_answer
+                        )
+                    )
+
+            # ------------------------------------------------
+            # FINAL EXTRACTION
+            # ------------------------------------------------
+
+            answer_text, new_memory = extract_response(
+                raw_answer_text
+            )
+
+            # ------------------------------------------------
+            # UPDATE MEMORY
+            # ------------------------------------------------
+
+            if new_memory:
+
+                st.session_state.engineering_memory = (
+                    new_memory
+                )
+
+            # ------------------------------------------------
+            # REASONING FALLBACK
+            # ------------------------------------------------
+
+            if not reasoning_text:
+
+                thinking_placeholder.markdown(
+                    "*No separate reasoning was returned by the model.*"
+                )
+
+            # ------------------------------------------------
+            # SAVE FINAL ANSWER
+            # ------------------------------------------------
+
+            st.session_state.messages.append(
+                {
+                    "role": "assistant",
+                    "content": answer_text,
+                }
+            )
+
+        # ====================================================
+        # NON-STREAMING
+        # ====================================================
+
+        else:
+
+            with st.spinner(
+                "Thinking..."
+            ):
+
+                try:
+
+                    response = client.chat.completions.create(
+                        model=model,
+                        messages=request_messages,
+                        temperature=creativity,
+                        reasoning_effort=reasoning_effort,
+                        max_completion_tokens=MAX_COMPLETION_TOKENS,
+                    )
+
+                except Exception as e:
+
+                    # ----------------------------------------
+                    # RATE LIMIT
+                    # ----------------------------------------
+
+                    if (
+                        get_rate_limit_type(e)
+                        is not None
+                    ):
+
+                        cooldown = handle_rate_limit_error(e)
+
+                        limit_type = (
+                            st.session_state.rate_limit_type
+                            or "RATE"
+                        )
+
+                        if limit_type == "TPM":
+
+                            st.warning(
+                                f"**Temporary token limit reached.**\n\n"
+                                f"This model has reached its tokens-per-minute "
+                                f"limit. Your message was not lost.\n\n"
+                                f"Please try again in approximately "
+                                f"**{cooldown} seconds**."
+                            )
+
+                        elif limit_type == "RPM":
+
+                            st.warning(
+                                f"**Temporary request limit reached.**\n\n"
+                                f"Too many requests were sent to this model.\n\n"
+                                f"Please try again in approximately "
+                                f"**{cooldown} seconds**."
+                            )
+
+                        elif limit_type == "DAILY":
+
+                            st.error(
+                                "**Daily model limit reached.**\n\n"
+                                "This model has reached its daily usage "
+                                "limit. Please use another model or wait "
+                                "for the provider's daily reset."
+                            )
+
+                        else:
+
+                            st.warning(
+                                f"**Temporary usage limit reached.**\n\n"
+                                f"Please try again in approximately "
+                                f"**{cooldown} seconds**."
+                            )
 
                     else:
 
-                        st.markdown(
-                            "*No reasoning was returned.*"
+                        st.error(
+                            f"API request failed: "
+                            f"{type(e).__name__}: {e}"
                         )
 
-                # ------------------------------------------------
-                # DISPLAY FULL ANSWER
-                # ------------------------------------------------
+                    st.session_state.messages.pop()
 
-                render_markdown(
-                    answer_text
+                    st.stop()
+
+            # ------------------------------------------------
+            # RAW RESPONSE
+            # ------------------------------------------------
+
+            raw_response = (
+                response
+                .choices[0]
+                .message
+                .content
+                or ""
+            )
+
+            # ------------------------------------------------
+            # EXTRACT ANSWER + MEMORY
+            # ------------------------------------------------
+
+            answer_text, new_memory = (
+                extract_response(
+                    raw_response
+                )
+            )
+
+            # ------------------------------------------------
+            # UPDATE MEMORY
+            # ------------------------------------------------
+
+            if new_memory:
+
+                st.session_state.engineering_memory = (
+                    new_memory
                 )
 
-                # ------------------------------------------------
-                # SAVE MODEL
-                # ------------------------------------------------
+            # ------------------------------------------------
+            # GET REASONING
+            # ------------------------------------------------
 
-                st.session_state.last_model_used = (
-                    current_model
-                )
+            reasoning_text = getattr(
+                response.choices[0].message,
+                "reasoning",
+                None,
+            )
 
-                successful_response = True
+            # ------------------------------------------------
+            # ENGINEERING PROCESS
+            # ------------------------------------------------
 
-                break
-
-        # ========================================================
-        # ALL MODELS FAILED
-        # ========================================================
-
-        if not successful_response:
-
-            # Remove the unsent user message so the chat does
-            # not pretend the request was successfully processed.
-            if (
-                st.session_state.messages
-                and st.session_state.messages[-1][
-                    "role"
-                ] == "user"
-                and st.session_state.messages[-1][
-                    "content"
-                ] == prompt
+            with st.expander(
+                "Engineering Process",
+                expanded=False,
             ):
 
-                st.session_state.messages.pop()
+                if reasoning_text:
 
-            show_all_models_unavailable()
+                    render_markdown(
+                        reasoning_text
+                    )
 
-            st.stop()
+                else:
 
-        # ========================================================
-        # SAVE FINAL ANSWER
-        # ========================================================
+                    st.markdown(
+                        "*No reasoning was returned.*"
+                    )
 
-        st.session_state.messages.append(
-            {
-                "role": "assistant",
-                "content": answer_text,
-            }
-        )
+            # ------------------------------------------------
+            # DISPLAY ANSWER
+            # ------------------------------------------------
+
+            render_markdown(
+                answer_text
+            )
+
+            # ------------------------------------------------
+            # SAVE ANSWER
+            # ------------------------------------------------
+
+            st.session_state.messages.append(
+                {
+                    "role": "assistant",
+                    "content": answer_text,
+                }
+            )
