@@ -22,7 +22,7 @@ db = chromadb.PersistentClient(path="./chromadb")
 brain = db.get_or_create_collection("documents")
 
 
-def chunk_it(text, size=400):
+def chunk_it(text, size=1000):
     bits = text.split(". ")
     chunks, current = [], ""
 
