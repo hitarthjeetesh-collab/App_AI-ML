@@ -170,8 +170,8 @@ if "rate_limit_type" not in st.session_state:
 # ============================================================
 
 st.set_page_config(
-    page_title="Robotics Engineering Assistant",
-    page_icon="🤖",
+    page_title="Robotics AI",
+    page_icon="assets/firefly.png",
     layout="wide",
 )
 
