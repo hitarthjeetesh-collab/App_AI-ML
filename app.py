@@ -3,6 +3,8 @@ import re
 import streamlit as st
 from dotenv import load_dotenv
 from openai import OpenAI
+import chromadb
+from doc_helper import read_file
 import time
 
 # ============================================================
@@ -15,6 +17,33 @@ client = OpenAI(
     base_url="https://api.groq.com/openai/v1",
     api_key=os.getenv("GROQ_API_KEY"),
 )
+
+db = chromadb.PersistentClient(path="./chromadb")
+brain = db.get_or_create_collection("documents")
+
+def chunk_it(text, size=400):
+    bits = text.split(". ")
+    chunks, current = [], ""
+    for bit in bits:
+        if len(current) + len(bit) < size:
+            current += bit + ". "
+        else:
+            if current.strip():
+                chunks.append(current.strip())
+            current = bit + ". "
+    if current.strip():
+        chunks.append(current.strip())
+    return chunks
+
+def store_document(file):
+    chunks = chunk_it(read_file(file))
+    prefix = file.name.replace(" ", "_")
+    brain.upsert(
+        documents = chunks,
+        ids = [f"{prefix}_{i}" for i in range(len(chunks))],
+
+    )
+    return len(chunks)
 
 # ------------------------------------------------------------
 # TOKEN OPTIMIZATION
@@ -584,6 +613,12 @@ with st.sidebar:
         f"{len(st.session_state.messages)} messages in this chat"
     )
 
+    if st.button("clear documents"):
+        db.delete_collection("documents")
+        st.rerun()
+    st.caption(f"{len(st.session_state.messages)} messages have been sent in chat")
+    st.caption(f"{brain.count()} chunks inside the chat")
+
 
 # ============================================================
 # COMPACT SYSTEM PROMPT
@@ -1002,8 +1037,10 @@ else:
 # CHAT INPUT
 # ============================================================
 
-prompt = st.chat_input(
-    "Enter your question here:"
+user_input = st.chat_input(
+    "Enter your question here:",
+    accept_file = True,
+    file_type = ["pdf", "txt"]
 )
 
 
@@ -1011,7 +1048,13 @@ prompt = st.chat_input(
 # NEW MESSAGE
 # ============================================================
 
-if prompt:
+if user_input:
+    prompt = user_input.text
+    if user_input.files:
+        for uploaded_file in user_input.files:
+            with st.spinner(f"processing {uploaded_file.name}..."):
+                n = store_document(uploaded_file)
+            st.success(f"processed {uploaded_file.name} into {n} chunks")
 
     # --------------------------------------------------------
     # SAVE USER MESSAGE
@@ -1491,6 +1534,6 @@ if prompt:
             st.session_state.messages.append(
                 {
                     "role": "assistant",
-                    "content": answer_text,
+                    "content": answer_text
                 }
             )
