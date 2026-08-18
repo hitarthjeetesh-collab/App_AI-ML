@@ -1074,13 +1074,20 @@ if user_input:
     with st.chat_message("user"):
 
         render_markdown(prompt)
+    notes = ""
+    if brain.count() >0 :
+        hits = brain.query(query_texts=[prompt], n_results = n_chunks)
+        notes = "\n\n" + join(hits["documents"][0])
 
+        with st.expander("What I looked up"):
+            for doc, dist in zip(hits["documents"][0], hits["distances"][0]):
+                st.text(f"{dist:.3f}, {doc[:70]}")
     # --------------------------------------------------------
     # BUILD OPTIMIZED CONTEXT
     # --------------------------------------------------------
 
     request_messages = build_messages()
-
+    notes_prompt = f"use these nots, but only if they are relevant:\n{notes}, to answer: {prompt}" if notes else ""
     # ========================================================
     # ASSISTANT
     # ========================================================
@@ -1097,7 +1104,8 @@ if user_input:
 
                 stream = client.chat.completions.create(
                     model=model,
-                    messages=request_messages,
+                    messages=[request_messages,
+                              {"role":"user","content": notes_prompt}],
                     temperature=creativity,
                     reasoning_effort=reasoning_effort,
                     max_completion_tokens=MAX_COMPLETION_TOKENS,
