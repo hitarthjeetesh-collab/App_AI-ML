@@ -1,5 +1,6 @@
 import os
 import re
+import uuid
 import streamlit as st
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -22,18 +23,45 @@ db = chromadb.PersistentClient(path="./chromadb")
 brain = db.get_or_create_collection("documents")
 
 
-def chunk_it(text, size=3000):
-    bits = text.split(". ")
-    chunks, current = [], ""
+def chunk_it(text, size=3000, overlap=300):
+    paragraphs = re.split(r"\n\s*\n", text)
 
-    for bit in bits:
-        if len(current) + len(bit) < size:
-            current += bit + ". "
+    chunks = []
+    current = ""
+
+    for paragraph in paragraphs:
+        paragraph = paragraph.strip()
+
+        if not paragraph:
+            continue
+
+        if len(current) + len(paragraph) + 2 <= size:
+            if current:
+                current += "\n\n" + paragraph
+            else:
+                current = paragraph
+
         else:
             if current.strip():
                 chunks.append(current.strip())
 
-            current = bit + ". "
+            if overlap > 0 and current:
+                overlap_text = current[-overlap:]
+                current = overlap_text + "\n\n" + paragraph
+            else:
+                current = paragraph
+
+            while len(current) > size:
+                chunks.append(current[:size].strip())
+
+                if overlap > 0:
+                    current = (
+                        current[size - overlap:]
+                        + "\n\n"
+                        + paragraph
+                    )
+                else:
+                    current = current[size:]
 
     if current.strip():
         chunks.append(current.strip())
@@ -44,18 +72,29 @@ def chunk_it(text, size=3000):
 def store_document(file):
     chunks = chunk_it(read_file(file))
 
-    prefix = file.name.replace(" ", "_")
+    # Remove older chunks from the same document.
+    try:
+        brain.delete(
+            where={
+                "source": file.name
+            }
+        )
+    except Exception:
+        pass
+
+    document_id = str(uuid.uuid4())
 
     brain.upsert(
         documents=chunks,
         ids=[
-            f"{prefix}_{i}"
+            f"{document_id}_{i}"
             for i in range(len(chunks))
         ],
         metadatas=[
             {
                 "source": file.name,
                 "chunk": i,
+                "document_id": document_id,
             }
             for i in range(len(chunks))
         ]
@@ -73,6 +112,8 @@ MAX_COMPLETION_TOKENS = 3000
 MAX_HISTORY_MESSAGES = 10
 
 MAX_ENGINEERING_MEMORY_CHARS = 30000
+
+MAX_RAG_DISTANCE = 0.8
 
 
 # ============================================================
@@ -166,6 +207,18 @@ def handle_rate_limit_error(error):
     limit_type = get_rate_limit_type(error)
 
     retry_seconds = get_retry_seconds(error)
+
+    # --------------------------------------------------------
+    # Daily limits do not use a temporary cooldown.
+    # --------------------------------------------------------
+
+    if limit_type == "DAILY":
+
+        st.session_state.rate_limit_until = 0
+
+        st.session_state.rate_limit_type = "DAILY"
+
+        return 0
 
     # --------------------------------------------------------
     # If Groq supplied a retry time, trust it.
@@ -644,13 +697,10 @@ with st.sidebar:
 
         st.rerun()
 
-    st.caption(
-        f"{len(st.session_state.messages)} "
-        f"messages have been sent in chat"
-    )
+    document_count = brain.count()
 
     st.caption(
-        f"{brain.count()} chunks inside the chat"
+        f"{document_count} document chunks stored"
     )
 
 
@@ -718,6 +768,12 @@ At the END of your response, output:
 </memory>
 
 The memory must be VERY SHORT: maximum about 150 words.
+
+Update the existing engineering memory when one is supplied.
+Preserve all still-valid existing facts.
+Add new durable project information.
+Remove or change information only when the user explicitly changes
+or invalidates it.
 
 Store ONLY durable project information:
 - user requirements
@@ -1052,10 +1108,18 @@ if rate_limited:
 
     st.rerun()
 
+elif st.session_state.rate_limit_type == "DAILY":
+
+    st.error(
+        "**Daily model limit reached.**\n\n"
+        "This model has reached its daily usage limit. "
+        "Please use another model or wait for the provider's "
+        "daily reset."
+    )
+
 else:
 
     st.session_state.rate_limit_until = 0
-
     st.session_state.rate_limit_type = None
 
 
@@ -1127,8 +1191,10 @@ if user_input:
 
     notes = ""
 
+    document_count = brain.count()
+
     if (
-        brain.count() > 0
+        document_count > 0
         and prompt.strip()
     ):
 
@@ -1138,7 +1204,7 @@ if user_input:
 
         n_chunks = min(
             8,
-            brain.count(),
+            document_count,
         )
 
         # ----------------------------------------------------
@@ -1160,14 +1226,52 @@ if user_input:
             [[]],
         )[0]
 
+        metadatas = hits.get(
+            "metadatas",
+            [[]],
+        )[0]
+
         # ----------------------------------------------------
-        # BUILD RAG NOTES
+        # FILTER AND BUILD RAG NOTES
         # ----------------------------------------------------
 
-        if documents:
+        relevant_documents = []
+
+        for doc, dist, metadata in zip(
+            documents,
+            distances,
+            metadatas,
+        ):
+
+            if dist <= MAX_RAG_DISTANCE:
+
+                relevant_documents.append(
+                    (
+                        doc,
+                        dist,
+                        metadata,
+                    )
+                )
+
+        if relevant_documents:
+
+            notes_parts = []
+
+            for doc, dist, metadata in relevant_documents:
+
+                source = metadata.get(
+                    "source",
+                    "Unknown document",
+                )
+
+                notes_parts.append(
+                    f"SOURCE: {source}\n"
+                    f"DISTANCE: {dist:.3f}\n"
+                    f"{doc}"
+                )
 
             notes = "\n\n".join(
-                documents
+                notes_parts
             )
 
             # ------------------------------------------------
@@ -1178,13 +1282,16 @@ if user_input:
                 "What I looked up"
             ):
 
-                for doc, dist in zip(
-                    documents,
-                    distances,
-                ):
+                for doc, dist, metadata in relevant_documents:
+
+                    source = metadata.get(
+                        "source",
+                        "Unknown document",
+                    )
 
                     st.text(
                         f"{dist:.3f}, "
+                        f"{source}: "
                         f"{doc[:70]}"
                     )
 
@@ -1193,21 +1300,6 @@ if user_input:
     # ========================================================
 
     request_messages = build_messages()
-
-    if notes:
-
-        notes_prompt = (
-            "Use these notes only if they are relevant "
-            "to the user's question.\n\n"
-            "DOCUMENT NOTES:\n"
-            f"{notes}\n\n"
-            "USER QUESTION:\n"
-            f"{prompt}"
-        )
-
-    else:
-
-        notes_prompt = ""
 
     # ========================================================
     # ASSISTANT
@@ -1235,12 +1327,20 @@ if user_input:
                 # ADD RAG CONTEXT
                 # --------------------------------------------
 
-                if notes_prompt:
+                if notes:
 
                     stream_messages.append(
                         {
-                            "role": "user",
-                            "content": notes_prompt,
+                            "role": "system",
+                            "content": (
+                                "RELEVANT DOCUMENT NOTES:\n"
+                                "Use these notes only when relevant "
+                                "to the user's question. "
+                                "Lower ChromaDB distance means greater "
+                                "similarity, but similarity does not "
+                                "guarantee relevance.\n\n"
+                                + notes
+                            ),
                         }
                     )
 
@@ -1537,12 +1637,20 @@ if user_input:
                     # ADD RAG CONTEXT
                     # ----------------------------------------
 
-                    if notes_prompt:
+                    if notes:
 
                         response_messages.append(
                             {
-                                "role": "user",
-                                "content": notes_prompt,
+                                "role": "system",
+                                "content": (
+                                    "RELEVANT DOCUMENT NOTES:\n"
+                                    "Use these notes only when relevant "
+                                    "to the user's question. "
+                                    "Lower ChromaDB distance means greater "
+                                    "similarity, but similarity does not "
+                                    "guarantee relevance.\n\n"
+                                    + notes
+                                ),
                             }
                         )
 
