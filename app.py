@@ -22,7 +22,7 @@ db = chromadb.PersistentClient(path="./chromadb")
 brain = db.get_or_create_collection("documents")
 
 
-def chunk_it(text, size=1000):
+def chunk_it(text, size=3000):
     bits = text.split(". ")
     chunks, current = [], ""
 
@@ -52,6 +52,13 @@ def store_document(file):
             f"{prefix}_{i}"
             for i in range(len(chunks))
         ],
+        metadatas=[
+            {
+                "source": file.name,
+                "chunk": i,
+            }
+            for i in range(len(chunks))
+        ]
     )
 
     return len(chunks)
@@ -63,9 +70,9 @@ def store_document(file):
 
 MAX_COMPLETION_TOKENS = 3000
 
-MAX_HISTORY_MESSAGES = 4
+MAX_HISTORY_MESSAGES = 10
 
-MAX_ENGINEERING_MEMORY_CHARS = 3000
+MAX_ENGINEERING_MEMORY_CHARS = 30000
 
 
 # ============================================================
@@ -1130,7 +1137,7 @@ if user_input:
         # ----------------------------------------------------
 
         n_chunks = min(
-            5,
+            10,
             brain.count(),
         )
 
