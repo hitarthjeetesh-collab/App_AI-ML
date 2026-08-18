@@ -20,431 +20,12 @@ client = OpenAI(
 # TOKEN OPTIMIZATION
 # ------------------------------------------------------------
 
-# Maximum generated completion.
 MAX_COMPLETION_TOKENS = 3000
 
-# Only the most recent messages are sent as normal conversation
-# history. Engineering context is handled separately.
 MAX_HISTORY_MESSAGES = 4
 
-# Hard limit for engineering memory.
-# This prevents memory from becoming another conversation transcript.
 MAX_ENGINEERING_MEMORY_CHARS = 3000
 
-
-# ============================================================
-# AUTOMATIC MODEL SELECTION
-# ============================================================
-
-# Models ordered from strongest to weakest.
-# Automatic fallback moves downward through this list
-# when the selected model hits a rate limit.
-AUTO_MODEL_LEVELS = [
-    "openai/gpt-oss-120b",
-    "qwen/qwen3.6-27b",
-    "openai/gpt-oss-20b",
-    "groq/compound-mini",
-]
-
-
-def calculate_question_difficulty(prompt):
-    """
-    Estimate question difficulty without making another API call.
-
-    The score is based on:
-    - question length
-    - number of engineering concepts
-    - calculations
-    - multi-step wording
-    - design/optimization work
-    - troubleshooting
-    - constraints
-    - mathematical notation
-    - component selection
-    """
-
-    if not prompt:
-        return 0, "easy"
-
-    text = prompt.lower().strip()
-
-    score = 0
-
-    # --------------------------------------------------------
-    # LENGTH
-    # --------------------------------------------------------
-
-    word_count = len(text.split())
-
-    if word_count >= 40:
-        score += 1
-
-    if word_count >= 80:
-        score += 1
-
-    if word_count >= 150:
-        score += 2
-
-    if word_count >= 300:
-        score += 2
-
-    # --------------------------------------------------------
-    # MULTI-STEP / COMPLEX QUESTION WORDING
-    # --------------------------------------------------------
-
-    multi_step_patterns = [
-        "step by step",
-        "multiple steps",
-        "first",
-        "then",
-        "after that",
-        "finally",
-        "compare",
-        "compare and",
-        "difference between",
-        "pros and cons",
-        "tradeoffs",
-        "trade-offs",
-        "optimize",
-        "optimization",
-        "design",
-        "redesign",
-        "calculate",
-        "calculate the",
-        "determine",
-        "derive",
-        "estimate",
-        "solve",
-        "analyze",
-        "analysis",
-        "evaluate",
-    ]
-
-    for pattern in multi_step_patterns:
-
-        if pattern in text:
-            score += 1
-
-    # --------------------------------------------------------
-    # ENGINEERING / TECHNICAL TERMS
-    # --------------------------------------------------------
-
-    engineering_terms = [
-        "torque",
-        "power",
-        "voltage",
-        "current",
-        "battery",
-        "capacity",
-        "motor",
-        "actuator",
-        "gearbox",
-        "gear ratio",
-        "efficiency",
-        "thermal",
-        "temperature",
-        "heat",
-        "cooling",
-        "load",
-        "force",
-        "acceleration",
-        "velocity",
-        "speed",
-        "mass",
-        "weight",
-        "friction",
-        "traction",
-        "rolling resistance",
-        "incline",
-        "slope",
-        "robot",
-        "robotics",
-        "mechanical",
-        "electrical",
-        "electronics",
-        "sensor",
-        "lidar",
-        "camera",
-        "imu",
-        "can bus",
-        "embedded",
-        "microcontroller",
-        "control system",
-        "controller",
-        "firmware",
-        "pcb",
-        "circuit",
-        "resistance",
-        "capacitance",
-        "inductance",
-        "transistor",
-        "mosfet",
-        "motor driver",
-        "bms",
-        "battery management",
-        "power supply",
-        "regulator",
-        "converter",
-        "dc-dc",
-        "buck",
-        "boost",
-        "wire",
-        "current draw",
-        "power consumption",
-        "runtime",
-        "autonomy",
-        "kinematics",
-        "dynamics",
-        "pid",
-        "trajectory",
-        "path planning",
-        "slam",
-        "computer vision",
-        "machine learning",
-        "neural network",
-    ]
-
-    engineering_matches = 0
-
-    for term in engineering_terms:
-
-        if term in text:
-            engineering_matches += 1
-
-    score += min(
-        engineering_matches,
-        8,
-    )
-
-    # --------------------------------------------------------
-    # MATHEMATICS
-    # --------------------------------------------------------
-
-    math_patterns = [
-        r"\d+\s*[\+\-\*\/]\s*\d+",
-        r"\d+\s*[x×]\s*\d+",
-        r"\d+\s*%",
-        r"\d+\s*(?:kg|g|lb|lbs)",
-        r"\d+\s*(?:v|volt|volts)",
-        r"\d+\s*(?:a|amp|amps)",
-        r"\d+\s*(?:w|kw|watts)",
-        r"\d+\s*(?:nm|n·m)",
-        r"\d+\s*(?:km/h|mph|m/s)",
-        r"\d+\s*(?:ah|mah|kwh|wh)",
-        r"\d+\s*(?:°|degrees)",
-    ]
-
-    math_matches = 0
-
-    for pattern in math_patterns:
-
-        if re.search(pattern, text):
-            math_matches += 1
-
-    score += min(
-        math_matches * 2,
-        8,
-    )
-
-    # --------------------------------------------------------
-    # EQUATIONS / VARIABLES
-    # --------------------------------------------------------
-
-    if "=" in text:
-        score += 2
-
-    if any(
-        symbol in text
-        for symbol in [
-            "sqrt",
-            "sin(",
-            "cos(",
-            "tan(",
-            "∑",
-            "∫",
-            "Δ",
-            "λ",
-            "Ω",
-        ]
-    ):
-        score += 2
-
-    # --------------------------------------------------------
-    # DESIGN / COMPONENT SELECTION
-    # --------------------------------------------------------
-
-    design_patterns = [
-        "what motor",
-        "which motor",
-        "what battery",
-        "which battery",
-        "what sensor",
-        "which sensor",
-        "what controller",
-        "which controller",
-        "what should i use",
-        "what should i choose",
-        "component selection",
-        "select a component",
-        "size the motor",
-        "size the battery",
-        "how large",
-        "how powerful",
-        "how much torque",
-        "how much power",
-    ]
-
-    for pattern in design_patterns:
-
-        if pattern in text:
-            score += 2
-
-    # --------------------------------------------------------
-    # TROUBLESHOOTING
-    # --------------------------------------------------------
-
-    troubleshooting_patterns = [
-        "error",
-        "exception",
-        "traceback",
-        "not working",
-        "doesn't work",
-        "doesnt work",
-        "won't work",
-        "wont work",
-        "crash",
-        "crashing",
-        "bug",
-        "failure",
-        "failing",
-        "problem",
-        "issue",
-        "broken",
-        "debug",
-        "debugging",
-        "why is",
-        "why does",
-        "why doesn't",
-        "why doesnt",
-    ]
-
-    for pattern in troubleshooting_patterns:
-
-        if pattern in text:
-            score += 2
-
-    # --------------------------------------------------------
-    # CONSTRAINTS
-    # --------------------------------------------------------
-
-    constraint_patterns = [
-        "must",
-        "minimum",
-        "maximum",
-        "at least",
-        "at most",
-        "within",
-        "under",
-        "over",
-        "limit",
-        "constraint",
-        "budget",
-        "weight limit",
-        "space limit",
-        "size limit",
-        "for 1 hour",
-        "for one hour",
-        "continuous",
-        "reliable",
-        "safety margin",
-    ]
-
-    constraint_matches = 0
-
-    for pattern in constraint_patterns:
-
-        if pattern in text:
-            constraint_matches += 1
-
-    score += min(
-        constraint_matches,
-        5,
-    )
-
-    # --------------------------------------------------------
-    # DETERMINE DIFFICULTY
-    # --------------------------------------------------------
-
-    if score <= 4:
-
-        difficulty = "easy"
-
-    elif score <= 10:
-
-        difficulty = "moderate"
-
-    elif score <= 17:
-
-        difficulty = "hard"
-
-    else:
-
-        difficulty = "very_hard"
-
-    return score, difficulty
-
-
-def select_model_automatically(prompt):
-    """
-    Select an appropriate model based on estimated question
-    difficulty.
-    """
-
-    score, difficulty = calculate_question_difficulty(
-        prompt
-    )
-
-    if difficulty == "easy":
-
-        selected_model = "groq/compound-mini"
-
-    elif difficulty == "moderate":
-
-        selected_model = "openai/gpt-oss-20b"
-
-    elif difficulty == "hard":
-
-        selected_model = "qwen/qwen3.6-27b"
-
-    else:
-
-        selected_model = "openai/gpt-oss-120b"
-
-    return (
-        selected_model,
-        difficulty,
-        score,
-    )
-
-
-def get_fallback_models(selected_model):
-    """
-    Return models below the currently selected model.
-
-    The returned list is ordered from the next strongest
-    model downward.
-    """
-
-    if selected_model not in AUTO_MODEL_LEVELS:
-        return []
-
-    selected_index = AUTO_MODEL_LEVELS.index(
-        selected_model
-    )
-
-    return AUTO_MODEL_LEVELS[
-        selected_index + 1:
-    ]
 
 # ============================================================
 # RATE LIMIT HANDLING
@@ -583,86 +164,6 @@ if "rate_limit_until" not in st.session_state:
 if "rate_limit_type" not in st.session_state:
     st.session_state.rate_limit_type = None
 
-def create_with_automatic_fallback(
-    request_messages,
-    selected_model,
-    automatic_mode,
-    **kwargs,
-):
-    """
-    Send the request using the selected model.
-
-    In automatic mode, if the selected model hits a rate limit,
-    automatically step down through weaker models.
-
-    In manual mode, only the selected model is attempted.
-    """
-
-    models_to_try = [
-        selected_model
-    ]
-
-    if automatic_mode:
-
-        models_to_try.extend(
-            get_fallback_models(
-                selected_model
-            )
-        )
-
-    last_error = None
-
-    for attempt_model in models_to_try:
-
-        try:
-
-            response = client.chat.completions.create(
-                model=attempt_model,
-                messages=request_messages,
-                **kwargs,
-            )
-
-            return (
-                response,
-                attempt_model,
-                None,
-            )
-
-        except Exception as e:
-
-            last_error = e
-
-            # ----------------------------------------------
-            # Only fall back on actual rate limits.
-            # ----------------------------------------------
-
-            if (
-                automatic_mode
-                and get_rate_limit_type(e) is not None
-            ):
-
-                continue
-
-            # ----------------------------------------------
-            # Any non-rate-limit error behaves exactly as
-            # before.
-            # ----------------------------------------------
-
-            return (
-                None,
-                selected_model,
-                e,
-            )
-
-    # --------------------------------------------------------
-    # Every automatic model was rate limited.
-    # --------------------------------------------------------
-
-    return (
-        None,
-        selected_model,
-        last_error,
-    )
 
 # ============================================================
 # PAGE CONFIG
@@ -685,15 +186,6 @@ if "messages" not in st.session_state:
 if "engineering_memory" not in st.session_state:
     st.session_state.engineering_memory = ""
 
-if "last_selected_model" not in st.session_state:
-    st.session_state.last_selected_model = None
-
-if "last_question_difficulty" not in st.session_state:
-    st.session_state.last_question_difficulty = None
-
-if "last_difficulty_score" not in st.session_state:
-    st.session_state.last_difficulty_score = None
-
 
 # ============================================================
 # LATEX CLEANING
@@ -701,61 +193,39 @@ if "last_difficulty_score" not in st.session_state:
 
 def clean_latex(text):
     """
-    Clean common LaTeX formatting problems without
-    changing normal Markdown.
+    Clean LaTeX formatting while preserving valid LaTeX.
+
+    The model may return:
+        \[ ... \]
+        \( ... \)
+        $$ ... $$
+        $ ... $
+        \begin{aligned} ... \end{aligned}
+
+    This function only normalizes delimiters and a few
+    known malformed constructs. It does NOT rewrite valid
+    LaTeX commands.
     """
 
     if not text:
         return text
 
+    # --------------------------------------------------------
     # Normalize escaped dollar signs.
+    # --------------------------------------------------------
+
     text = text.replace(r"\$", "$")
 
-    # Fix malformed [4pt] endings.
-    text = re.sub(
-        r"(?:\\+|\$+)?\s*\$?\s*4pt\s*\]",
-        r"\\\\",
-        text,
-        flags=re.IGNORECASE,
-    )
+    # --------------------------------------------------------
+    # Convert display math:
+    #
+    # \[ ... \]
+    #
+    # into:
+    #
+    # $$ ... $$
+    # --------------------------------------------------------
 
-    # Fix double-escaped common LaTeX commands.
-    commands = [
-        "frac",
-        "sqrt",
-        "sin",
-        "cos",
-        "tan",
-        "log",
-        "ln",
-        "exp",
-        "times",
-        "approx",
-        "pm",
-        "omega",
-        "theta",
-        "eta",
-        "mu",
-        "pi",
-        "sum",
-        "int",
-        "cdot",
-        "text",
-        "mathrm",
-        "left",
-        "right",
-        "begin",
-        "end",
-    ]
-
-    for command in commands:
-
-        text = text.replace(
-            f"\\\\{command}",
-            f"\\{command}",
-        )
-
-    # Convert \[ ... \] to $$ ... $$.
     text = re.sub(
         r"\\\[\s*([\s\S]*?)\s*\\\]",
         lambda match: (
@@ -766,7 +236,16 @@ def clean_latex(text):
         text,
     )
 
-    # Convert \( ... \) to $ ... $.
+    # --------------------------------------------------------
+    # Convert inline math:
+    #
+    # \( ... \)
+    #
+    # into:
+    #
+    # $ ... $
+    # --------------------------------------------------------
+
     text = re.sub(
         r"\\\(\s*([\s\S]*?)\s*\\\)",
         lambda match: (
@@ -777,39 +256,40 @@ def clean_latex(text):
         text,
     )
 
-    # Wrap aligned environments.
-    aligned_pattern = re.compile(
-        r"(?<!\$)"
-        r"(\\begin\{aligned\}[\s\S]*?\\end\{aligned\})"
-        r"(?!\$)",
-        flags=re.MULTILINE,
-    )
+    # --------------------------------------------------------
+    # Fix malformed LaTeX line spacing.
+    #
+    # Models sometimes generate:
+    #
+    # \\[4pt]
+    #
+    # which should simply be:
+    #
+    # \\
+    # --------------------------------------------------------
 
-    def wrap_aligned(match):
-
-        equation = match.group(1).strip()
-
-        return (
-            "\n\n"
-            "$$\n"
-            + equation
-            + "\n$$"
-            "\n\n"
-        )
-
-    text = aligned_pattern.sub(
-        wrap_aligned,
-        text,
-    )
-
-    # Fix malformed aligned spacing.
     text = re.sub(
-        r"\\{2,}\s*\[4pt\]",
+        r"\\\\+\s*\[\s*4pt\s*\]",
         r"\\\\",
         text,
+        flags=re.IGNORECASE,
     )
 
+    # --------------------------------------------------------
+    # Also handle escaped/malformed variants.
+    # --------------------------------------------------------
+
+    text = re.sub(
+        r"\\+\s*\[\s*4pt\s*\]",
+        r"\\\\",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    # --------------------------------------------------------
     # Remove excessive blank lines.
+    # --------------------------------------------------------
+
     text = re.sub(
         r"\n{4,}",
         "\n\n\n",
@@ -817,7 +297,6 @@ def clean_latex(text):
     )
 
     return text
-
 
 def render_markdown(text):
 
@@ -899,20 +378,6 @@ with st.sidebar:
     st.subheader("Settings")
 
     # --------------------------------------------------------
-    # MODEL SELECTION MODE
-    # --------------------------------------------------------
-
-    model_selection_mode = st.radio(
-        "Model selection",
-        (
-            "Automatic",
-            "Manual",
-        ),
-        horizontal=True,
-        index=0,
-    )
-
-    # --------------------------------------------------------
     # MODEL
     # --------------------------------------------------------
 
@@ -925,34 +390,7 @@ with st.sidebar:
             "groq/compound-mini",
         ),
         index=0,
-        disabled=(
-            model_selection_mode == "Automatic"
-        ),
     )
-
-    # --------------------------------------------------------
-    # AUTOMATIC MODEL INFORMATION
-    # --------------------------------------------------------
-
-    if model_selection_mode == "Automatic":
-
-        st.caption(
-            "Automatic mode selects a model based on question difficulty."
-        )
-
-        if st.session_state.last_selected_model:
-
-            st.caption(
-                "Last selected: "
-                + st.session_state.last_selected_model
-            )
-
-            if st.session_state.last_question_difficulty:
-
-                st.caption(
-                    "Difficulty: "
-                    + st.session_state.last_question_difficulty
-                )
 
     # --------------------------------------------------------
     # STREAMING
@@ -1306,25 +744,101 @@ def build_messages():
 
 
 # ============================================================
-# EXTRACT ANSWER + MEMORY
+# EXTRACT ANSWER + REASONING + MEMORY
 # ============================================================
 
 def extract_response(raw_text):
     """
-    Separate the user-facing answer from the compact
-    engineering memory.
+    Separate the user-facing answer from reasoning and memory.
 
-    The user sees the complete answer.
+    Supports both:
 
-    Only the <memory> section is stored as engineering memory.
+    1. Native API reasoning:
+       reasoning is handled separately by the API.
+
+    2. Models that return:
+       <think>
+       reasoning...
+       </think>
+
+    Only the actual answer is returned as the answer.
+
+    Returns:
+        answer
+        inline_reasoning
+        memory
     """
 
     if not raw_text:
-        return "", ""
+        return "", "", ""
+
+    working_text = raw_text
+
+    # --------------------------------------------------------
+    # EXTRACT <think>...</think>
+    # --------------------------------------------------------
+
+    reasoning_parts = []
+
+    think_pattern = re.compile(
+        r"<think>\s*([\s\S]*?)\s*</think>",
+        flags=re.IGNORECASE,
+    )
+
+    for match in think_pattern.finditer(
+        working_text
+    ):
+
+        reasoning = match.group(1).strip()
+
+        if reasoning:
+            reasoning_parts.append(
+                reasoning
+            )
+
+    working_text = think_pattern.sub(
+        "",
+        working_text,
+    )
+
+    # --------------------------------------------------------
+    # HANDLE <think> THAT HAS STARTED BUT HAS NOT CLOSED YET
+    #
+    # This is especially important during streaming.
+    # Anything after an unmatched <think> is treated as
+    # reasoning rather than being shown as the answer.
+    # --------------------------------------------------------
+
+    open_think_match = re.search(
+        r"<think>\s*([\s\S]*)$",
+        working_text,
+        flags=re.IGNORECASE,
+    )
+
+    if open_think_match:
+
+        partial_reasoning = (
+            open_think_match.group(1).strip()
+        )
+
+        if partial_reasoning:
+            reasoning_parts.append(
+                partial_reasoning
+            )
+
+        working_text = (
+            working_text[
+                :open_think_match.start()
+            ]
+        )
+
+    # --------------------------------------------------------
+    # EXTRACT MEMORY
+    # --------------------------------------------------------
 
     memory_match = re.search(
         r"<memory>\s*([\s\S]*?)\s*</memory>",
-        raw_text,
+        working_text,
         flags=re.IGNORECASE,
     )
 
@@ -1334,16 +848,49 @@ def extract_response(raw_text):
             memory_match.group(1)
         )
 
-        answer = raw_text[
+        answer = working_text[
             :memory_match.start()
         ].rstrip()
 
     else:
 
-        answer = raw_text.rstrip()
+        answer = working_text.rstrip()
         memory = ""
 
-    return answer, memory
+    # --------------------------------------------------------
+    # HANDLE MEMORY THAT HAS STARTED BUT HAS NOT CLOSED YET
+    #
+    # During streaming, don't display the partial memory.
+    # --------------------------------------------------------
+
+    open_memory_match = re.search(
+        r"<memory>\s*([\s\S]*)$",
+        answer,
+        flags=re.IGNORECASE,
+    )
+
+    if open_memory_match:
+
+        answer = (
+            answer[
+                :open_memory_match.start()
+            ]
+            .rstrip()
+        )
+
+    # --------------------------------------------------------
+    # COMBINE REASONING
+    # --------------------------------------------------------
+
+    inline_reasoning = "\n\n".join(
+        reasoning_parts
+    ).strip()
+
+    return (
+        answer,
+        inline_reasoning,
+        memory,
+    )
 
 
 # ============================================================
@@ -1467,48 +1014,6 @@ prompt = st.chat_input(
 if prompt:
 
     # --------------------------------------------------------
-    # SELECT MODEL
-    # --------------------------------------------------------
-
-    if model_selection_mode == "Automatic":
-
-        (
-            selected_model,
-            question_difficulty,
-            difficulty_score,
-        ) = select_model_automatically(
-            prompt
-        )
-
-        st.session_state.last_selected_model = (
-            selected_model
-        )
-
-        st.session_state.last_question_difficulty = (
-            question_difficulty
-        )
-
-        st.session_state.last_difficulty_score = (
-            difficulty_score
-        )
-
-    else:
-
-        selected_model = model
-
-        st.session_state.last_selected_model = (
-            selected_model
-        )
-
-        st.session_state.last_question_difficulty = (
-            "manual"
-        )
-
-        st.session_state.last_difficulty_score = (
-            None
-        )
-
-    # --------------------------------------------------------
     # SAVE USER MESSAGE
     # --------------------------------------------------------
 
@@ -1547,53 +1052,14 @@ if prompt:
 
             try:
 
-                stream = None
-                last_error = None
-
-                models_to_try = [selected_model]
-
-                if model_selection_mode == "Automatic":
-                    models_to_try.extend(
-                        get_fallback_models(
-                            selected_model
-                        )
-                    )
-
-                for attempt_model in models_to_try:
-
-                    try:
-
-                        stream = client.chat.completions.create(
-                            model=attempt_model,
-                            messages=request_messages,
-                            temperature=creativity,
-                            reasoning_effort=reasoning_effort,
-                            max_completion_tokens=MAX_COMPLETION_TOKENS,
-                            stream=True,
-                        )
-
-                        selected_model = attempt_model
-
-                        st.session_state.last_selected_model = (
-                            selected_model
-                        )
-
-                        break
-
-                    except Exception as e:
-
-                        last_error = e
-
-                        if (
-                                model_selection_mode == "Automatic"
-                                and get_rate_limit_type(e) is not None
-                        ):
-                            continue
-
-                        raise e
-
-                if stream is None:
-                    raise last_error
+                stream = client.chat.completions.create(
+                    model=model,
+                    messages=request_messages,
+                    temperature=creativity,
+                    reasoning_effort=reasoning_effort,
+                    max_completion_tokens=MAX_COMPLETION_TOKENS,
+                    stream=True,
+                )
 
             except Exception as e:
 
@@ -1678,6 +1144,7 @@ if prompt:
             answer_placeholder = st.empty()
 
             reasoning_text = ""
+            inline_reasoning_text = ""
             raw_answer_text = ""
 
             # ------------------------------------------------
@@ -1692,7 +1159,7 @@ if prompt:
                 delta = chunk.choices[0].delta
 
                 # ============================================
-                # REASONING
+                # NATIVE API REASONING
                 # ============================================
 
                 reasoning = getattr(
@@ -1704,12 +1171,6 @@ if prompt:
                 if reasoning:
 
                     reasoning_text += reasoning
-
-                    thinking_placeholder.markdown(
-                        clean_latex(
-                            reasoning_text
-                        )
-                    )
 
                 # ============================================
                 # FINAL RESPONSE
@@ -1725,22 +1186,72 @@ if prompt:
 
                     raw_answer_text += content
 
-                    # Do not show memory block.
-                    visible_answer, _ = extract_response(
-                        raw_answer_text
+                # ============================================
+                # PARSE CONTENT
+                #
+                # This catches models that put reasoning inside
+                # <think>...</think>.
+                # ============================================
+
+                (
+                    visible_answer,
+                    inline_reasoning,
+                    _
+                ) = extract_response(
+                    raw_answer_text
+                )
+
+                inline_reasoning_text = (
+                    inline_reasoning
+                )
+
+                # ============================================
+                # DISPLAY ENGINEERING PROCESS
+                # ============================================
+
+                combined_reasoning_parts = []
+
+                if reasoning_text.strip():
+
+                    combined_reasoning_parts.append(
+                        reasoning_text.strip()
                     )
 
-                    answer_placeholder.markdown(
+                if inline_reasoning_text.strip():
+
+                    combined_reasoning_parts.append(
+                        inline_reasoning_text.strip()
+                    )
+
+                if combined_reasoning_parts:
+
+                    thinking_placeholder.markdown(
                         clean_latex(
-                            visible_answer
+                            "\n\n".join(
+                                combined_reasoning_parts
+                            )
                         )
                     )
+
+                # ============================================
+                # DISPLAY FINAL ANSWER
+                # ============================================
+
+                answer_placeholder.markdown(
+                    clean_latex(
+                        visible_answer
+                    )
+                )
 
             # ------------------------------------------------
             # FINAL EXTRACTION
             # ------------------------------------------------
 
-            answer_text, new_memory = extract_response(
+            (
+                answer_text,
+                inline_reasoning_text,
+                new_memory,
+            ) = extract_response(
                 raw_answer_text
             )
 
@@ -1758,7 +1269,31 @@ if prompt:
             # REASONING FALLBACK
             # ------------------------------------------------
 
-            if not reasoning_text:
+            combined_reasoning_parts = []
+
+            if reasoning_text.strip():
+
+                combined_reasoning_parts.append(
+                    reasoning_text.strip()
+                )
+
+            if inline_reasoning_text.strip():
+
+                combined_reasoning_parts.append(
+                    inline_reasoning_text.strip()
+                )
+
+            if combined_reasoning_parts:
+
+                thinking_placeholder.markdown(
+                    clean_latex(
+                        "\n\n".join(
+                            combined_reasoning_parts
+                        )
+                    )
+                )
+
+            else:
 
                 thinking_placeholder.markdown(
                     "*No separate reasoning was returned by the model.*"
@@ -1787,52 +1322,13 @@ if prompt:
 
                 try:
 
-                    response = None
-                    last_error = None
-
-                    models_to_try = [selected_model]
-
-                    if model_selection_mode == "Automatic":
-                        models_to_try.extend(
-                            get_fallback_models(
-                                selected_model
-                            )
-                        )
-
-                    for attempt_model in models_to_try:
-
-                        try:
-
-                            response = client.chat.completions.create(
-                                model=attempt_model,
-                                messages=request_messages,
-                                temperature=creativity,
-                                reasoning_effort=reasoning_effort,
-                                max_completion_tokens=MAX_COMPLETION_TOKENS,
-                            )
-
-                            selected_model = attempt_model
-
-                            st.session_state.last_selected_model = (
-                                selected_model
-                            )
-
-                            break
-
-                        except Exception as e:
-
-                            last_error = e
-
-                            if (
-                                    model_selection_mode == "Automatic"
-                                    and get_rate_limit_type(e) is not None
-                            ):
-                                continue
-
-                            raise e
-
-                    if response is None:
-                        raise last_error
+                    response = client.chat.completions.create(
+                        model=model,
+                        messages=request_messages,
+                        temperature=creativity,
+                        reasoning_effort=reasoning_effort,
+                        max_completion_tokens=MAX_COMPLETION_TOKENS,
+                    )
 
                 except Exception as e:
 
@@ -1912,13 +1408,15 @@ if prompt:
             )
 
             # ------------------------------------------------
-            # EXTRACT ANSWER + MEMORY
+            # EXTRACT ANSWER + REASONING + MEMORY
             # ------------------------------------------------
 
-            answer_text, new_memory = (
-                extract_response(
-                    raw_response
-                )
+            (
+                answer_text,
+                inline_reasoning_text,
+                new_memory,
+            ) = extract_response(
+                raw_response
             )
 
             # ------------------------------------------------
@@ -1932,7 +1430,7 @@ if prompt:
                 )
 
             # ------------------------------------------------
-            # GET REASONING
+            # GET NATIVE API REASONING
             # ------------------------------------------------
 
             reasoning_text = getattr(
@@ -1950,10 +1448,26 @@ if prompt:
                 expanded=False,
             ):
 
+                combined_reasoning_parts = []
+
                 if reasoning_text:
 
+                    combined_reasoning_parts.append(
+                        reasoning_text.strip()
+                    )
+
+                if inline_reasoning_text:
+
+                    combined_reasoning_parts.append(
+                        inline_reasoning_text.strip()
+                    )
+
+                if combined_reasoning_parts:
+
                     render_markdown(
-                        reasoning_text
+                        "\n\n".join(
+                            combined_reasoning_parts
+                        )
                     )
 
                 else:
