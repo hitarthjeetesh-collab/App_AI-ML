@@ -171,7 +171,7 @@ if "rate_limit_type" not in st.session_state:
 
 st.set_page_config(
     page_title="Robotics AI",
-    page_icon="assets/firefly.png",
+    page_icon=assets/Firefly.png,
     layout="wide",
 )
 
