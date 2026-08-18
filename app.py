@@ -36,13 +36,15 @@ MAX_ENGINEERING_MEMORY_CHARS = 3000
 # AUTOMATIC MODEL SELECTION
 # ============================================================
 
-# Models ordered from weaker/faster to stronger/more capable.
-AUTO_MODEL_LEVELS = {
-    "easy": "groq/compound-mini",
-    "moderate": "openai/gpt-oss-20b",
-    "hard": "qwen/qwen3.6-27b",
-    "very_hard": "openai/gpt-oss-120b",
-}
+# Models ordered from strongest to weakest.
+# Automatic fallback moves downward through this list
+# when the selected model hits a rate limit.
+AUTO_MODEL_LEVELS = [
+    "openai/gpt-oss-120b",
+    "qwen/qwen3.6-27b",
+    "openai/gpt-oss-20b",
+    "groq/compound-mini",
+]
 
 
 def calculate_question_difficulty(prompt):
@@ -402,9 +404,21 @@ def select_model_automatically(prompt):
         prompt
     )
 
-    selected_model = AUTO_MODEL_LEVELS[
-        difficulty
-    ]
+    if difficulty == "easy":
+
+        selected_model = "groq/compound-mini"
+
+    elif difficulty == "moderate":
+
+        selected_model = "openai/gpt-oss-20b"
+
+    elif difficulty == "hard":
+
+        selected_model = "qwen/qwen3.6-27b"
+
+    else:
+
+        selected_model = "openai/gpt-oss-120b"
 
     return (
         selected_model,
@@ -412,6 +426,25 @@ def select_model_automatically(prompt):
         score,
     )
 
+
+def get_fallback_models(selected_model):
+    """
+    Return models below the currently selected model.
+
+    The returned list is ordered from the next strongest
+    model downward.
+    """
+
+    if selected_model not in AUTO_MODEL_LEVELS:
+        return []
+
+    selected_index = AUTO_MODEL_LEVELS.index(
+        selected_model
+    )
+
+    return AUTO_MODEL_LEVELS[
+        selected_index + 1:
+    ]
 
 # ============================================================
 # RATE LIMIT HANDLING
@@ -550,6 +583,86 @@ if "rate_limit_until" not in st.session_state:
 if "rate_limit_type" not in st.session_state:
     st.session_state.rate_limit_type = None
 
+def create_with_automatic_fallback(
+    request_messages,
+    selected_model,
+    automatic_mode,
+    **kwargs,
+):
+    """
+    Send the request using the selected model.
+
+    In automatic mode, if the selected model hits a rate limit,
+    automatically step down through weaker models.
+
+    In manual mode, only the selected model is attempted.
+    """
+
+    models_to_try = [
+        selected_model
+    ]
+
+    if automatic_mode:
+
+        models_to_try.extend(
+            get_fallback_models(
+                selected_model
+            )
+        )
+
+    last_error = None
+
+    for attempt_model in models_to_try:
+
+        try:
+
+            response = client.chat.completions.create(
+                model=attempt_model,
+                messages=request_messages,
+                **kwargs,
+            )
+
+            return (
+                response,
+                attempt_model,
+                None,
+            )
+
+        except Exception as e:
+
+            last_error = e
+
+            # ----------------------------------------------
+            # Only fall back on actual rate limits.
+            # ----------------------------------------------
+
+            if (
+                automatic_mode
+                and get_rate_limit_type(e) is not None
+            ):
+
+                continue
+
+            # ----------------------------------------------
+            # Any non-rate-limit error behaves exactly as
+            # before.
+            # ----------------------------------------------
+
+            return (
+                None,
+                selected_model,
+                e,
+            )
+
+    # --------------------------------------------------------
+    # Every automatic model was rate limited.
+    # --------------------------------------------------------
+
+    return (
+        None,
+        selected_model,
+        last_error,
+    )
 
 # ============================================================
 # PAGE CONFIG
@@ -1434,14 +1547,53 @@ if prompt:
 
             try:
 
-                stream = client.chat.completions.create(
-                    model=selected_model,
-                    messages=request_messages,
-                    temperature=creativity,
-                    reasoning_effort=reasoning_effort,
-                    max_completion_tokens=MAX_COMPLETION_TOKENS,
-                    stream=True,
-                )
+                stream = None
+                last_error = None
+
+                models_to_try = [selected_model]
+
+                if model_selection_mode == "Automatic":
+                    models_to_try.extend(
+                        get_fallback_models(
+                            selected_model
+                        )
+                    )
+
+                for attempt_model in models_to_try:
+
+                    try:
+
+                        stream = client.chat.completions.create(
+                            model=attempt_model,
+                            messages=request_messages,
+                            temperature=creativity,
+                            reasoning_effort=reasoning_effort,
+                            max_completion_tokens=MAX_COMPLETION_TOKENS,
+                            stream=True,
+                        )
+
+                        selected_model = attempt_model
+
+                        st.session_state.last_selected_model = (
+                            selected_model
+                        )
+
+                        break
+
+                    except Exception as e:
+
+                        last_error = e
+
+                        if (
+                                model_selection_mode == "Automatic"
+                                and get_rate_limit_type(e) is not None
+                        ):
+                            continue
+
+                        raise e
+
+                if stream is None:
+                    raise last_error
 
             except Exception as e:
 
@@ -1635,13 +1787,52 @@ if prompt:
 
                 try:
 
-                    response = client.chat.completions.create(
-                        model=selected_model,
-                        messages=request_messages,
-                        temperature=creativity,
-                        reasoning_effort=reasoning_effort,
-                        max_completion_tokens=MAX_COMPLETION_TOKENS,
-                    )
+                    response = None
+                    last_error = None
+
+                    models_to_try = [selected_model]
+
+                    if model_selection_mode == "Automatic":
+                        models_to_try.extend(
+                            get_fallback_models(
+                                selected_model
+                            )
+                        )
+
+                    for attempt_model in models_to_try:
+
+                        try:
+
+                            response = client.chat.completions.create(
+                                model=attempt_model,
+                                messages=request_messages,
+                                temperature=creativity,
+                                reasoning_effort=reasoning_effort,
+                                max_completion_tokens=MAX_COMPLETION_TOKENS,
+                            )
+
+                            selected_model = attempt_model
+
+                            st.session_state.last_selected_model = (
+                                selected_model
+                            )
+
+                            break
+
+                        except Exception as e:
+
+                            last_error = e
+
+                            if (
+                                    model_selection_mode == "Automatic"
+                                    and get_rate_limit_type(e) is not None
+                            ):
+                                continue
+
+                            raise e
+
+                    if response is None:
+                        raise last_error
 
                 except Exception as e:
 
