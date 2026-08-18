@@ -33,6 +33,387 @@ MAX_ENGINEERING_MEMORY_CHARS = 3000
 
 
 # ============================================================
+# AUTOMATIC MODEL SELECTION
+# ============================================================
+
+# Models ordered from weaker/faster to stronger/more capable.
+AUTO_MODEL_LEVELS = {
+    "easy": "groq/compound-mini",
+    "moderate": "openai/gpt-oss-20b",
+    "hard": "qwen/qwen3.6-27b",
+    "very_hard": "openai/gpt-oss-120b",
+}
+
+
+def calculate_question_difficulty(prompt):
+    """
+    Estimate question difficulty without making another API call.
+
+    The score is based on:
+    - question length
+    - number of engineering concepts
+    - calculations
+    - multi-step wording
+    - design/optimization work
+    - troubleshooting
+    - constraints
+    - mathematical notation
+    - component selection
+    """
+
+    if not prompt:
+        return 0, "easy"
+
+    text = prompt.lower().strip()
+
+    score = 0
+
+    # --------------------------------------------------------
+    # LENGTH
+    # --------------------------------------------------------
+
+    word_count = len(text.split())
+
+    if word_count >= 40:
+        score += 1
+
+    if word_count >= 80:
+        score += 1
+
+    if word_count >= 150:
+        score += 2
+
+    if word_count >= 300:
+        score += 2
+
+    # --------------------------------------------------------
+    # MULTI-STEP / COMPLEX QUESTION WORDING
+    # --------------------------------------------------------
+
+    multi_step_patterns = [
+        "step by step",
+        "multiple steps",
+        "first",
+        "then",
+        "after that",
+        "finally",
+        "compare",
+        "compare and",
+        "difference between",
+        "pros and cons",
+        "tradeoffs",
+        "trade-offs",
+        "optimize",
+        "optimization",
+        "design",
+        "redesign",
+        "calculate",
+        "calculate the",
+        "determine",
+        "derive",
+        "estimate",
+        "solve",
+        "analyze",
+        "analysis",
+        "evaluate",
+    ]
+
+    for pattern in multi_step_patterns:
+
+        if pattern in text:
+            score += 1
+
+    # --------------------------------------------------------
+    # ENGINEERING / TECHNICAL TERMS
+    # --------------------------------------------------------
+
+    engineering_terms = [
+        "torque",
+        "power",
+        "voltage",
+        "current",
+        "battery",
+        "capacity",
+        "motor",
+        "actuator",
+        "gearbox",
+        "gear ratio",
+        "efficiency",
+        "thermal",
+        "temperature",
+        "heat",
+        "cooling",
+        "load",
+        "force",
+        "acceleration",
+        "velocity",
+        "speed",
+        "mass",
+        "weight",
+        "friction",
+        "traction",
+        "rolling resistance",
+        "incline",
+        "slope",
+        "robot",
+        "robotics",
+        "mechanical",
+        "electrical",
+        "electronics",
+        "sensor",
+        "lidar",
+        "camera",
+        "imu",
+        "can bus",
+        "embedded",
+        "microcontroller",
+        "control system",
+        "controller",
+        "firmware",
+        "pcb",
+        "circuit",
+        "resistance",
+        "capacitance",
+        "inductance",
+        "transistor",
+        "mosfet",
+        "motor driver",
+        "bms",
+        "battery management",
+        "power supply",
+        "regulator",
+        "converter",
+        "dc-dc",
+        "buck",
+        "boost",
+        "wire",
+        "current draw",
+        "power consumption",
+        "runtime",
+        "autonomy",
+        "kinematics",
+        "dynamics",
+        "pid",
+        "trajectory",
+        "path planning",
+        "slam",
+        "computer vision",
+        "machine learning",
+        "neural network",
+    ]
+
+    engineering_matches = 0
+
+    for term in engineering_terms:
+
+        if term in text:
+            engineering_matches += 1
+
+    score += min(
+        engineering_matches,
+        8,
+    )
+
+    # --------------------------------------------------------
+    # MATHEMATICS
+    # --------------------------------------------------------
+
+    math_patterns = [
+        r"\d+\s*[\+\-\*\/]\s*\d+",
+        r"\d+\s*[x×]\s*\d+",
+        r"\d+\s*%",
+        r"\d+\s*(?:kg|g|lb|lbs)",
+        r"\d+\s*(?:v|volt|volts)",
+        r"\d+\s*(?:a|amp|amps)",
+        r"\d+\s*(?:w|kw|watts)",
+        r"\d+\s*(?:nm|n·m)",
+        r"\d+\s*(?:km/h|mph|m/s)",
+        r"\d+\s*(?:ah|mah|kwh|wh)",
+        r"\d+\s*(?:°|degrees)",
+    ]
+
+    math_matches = 0
+
+    for pattern in math_patterns:
+
+        if re.search(pattern, text):
+            math_matches += 1
+
+    score += min(
+        math_matches * 2,
+        8,
+    )
+
+    # --------------------------------------------------------
+    # EQUATIONS / VARIABLES
+    # --------------------------------------------------------
+
+    if "=" in text:
+        score += 2
+
+    if any(
+        symbol in text
+        for symbol in [
+            "sqrt",
+            "sin(",
+            "cos(",
+            "tan(",
+            "∑",
+            "∫",
+            "Δ",
+            "λ",
+            "Ω",
+        ]
+    ):
+        score += 2
+
+    # --------------------------------------------------------
+    # DESIGN / COMPONENT SELECTION
+    # --------------------------------------------------------
+
+    design_patterns = [
+        "what motor",
+        "which motor",
+        "what battery",
+        "which battery",
+        "what sensor",
+        "which sensor",
+        "what controller",
+        "which controller",
+        "what should i use",
+        "what should i choose",
+        "component selection",
+        "select a component",
+        "size the motor",
+        "size the battery",
+        "how large",
+        "how powerful",
+        "how much torque",
+        "how much power",
+    ]
+
+    for pattern in design_patterns:
+
+        if pattern in text:
+            score += 2
+
+    # --------------------------------------------------------
+    # TROUBLESHOOTING
+    # --------------------------------------------------------
+
+    troubleshooting_patterns = [
+        "error",
+        "exception",
+        "traceback",
+        "not working",
+        "doesn't work",
+        "doesnt work",
+        "won't work",
+        "wont work",
+        "crash",
+        "crashing",
+        "bug",
+        "failure",
+        "failing",
+        "problem",
+        "issue",
+        "broken",
+        "debug",
+        "debugging",
+        "why is",
+        "why does",
+        "why doesn't",
+        "why doesnt",
+    ]
+
+    for pattern in troubleshooting_patterns:
+
+        if pattern in text:
+            score += 2
+
+    # --------------------------------------------------------
+    # CONSTRAINTS
+    # --------------------------------------------------------
+
+    constraint_patterns = [
+        "must",
+        "minimum",
+        "maximum",
+        "at least",
+        "at most",
+        "within",
+        "under",
+        "over",
+        "limit",
+        "constraint",
+        "budget",
+        "weight limit",
+        "space limit",
+        "size limit",
+        "for 1 hour",
+        "for one hour",
+        "continuous",
+        "reliable",
+        "safety margin",
+    ]
+
+    constraint_matches = 0
+
+    for pattern in constraint_patterns:
+
+        if pattern in text:
+            constraint_matches += 1
+
+    score += min(
+        constraint_matches,
+        5,
+    )
+
+    # --------------------------------------------------------
+    # DETERMINE DIFFICULTY
+    # --------------------------------------------------------
+
+    if score <= 4:
+
+        difficulty = "easy"
+
+    elif score <= 10:
+
+        difficulty = "moderate"
+
+    elif score <= 17:
+
+        difficulty = "hard"
+
+    else:
+
+        difficulty = "very_hard"
+
+    return score, difficulty
+
+
+def select_model_automatically(prompt):
+    """
+    Select an appropriate model based on estimated question
+    difficulty.
+    """
+
+    score, difficulty = calculate_question_difficulty(
+        prompt
+    )
+
+    selected_model = AUTO_MODEL_LEVELS[
+        difficulty
+    ]
+
+    return (
+        selected_model,
+        difficulty,
+        score,
+    )
+
+
+# ============================================================
 # RATE LIMIT HANDLING
 # ============================================================
 
@@ -190,6 +571,15 @@ if "messages" not in st.session_state:
 
 if "engineering_memory" not in st.session_state:
     st.session_state.engineering_memory = ""
+
+if "last_selected_model" not in st.session_state:
+    st.session_state.last_selected_model = None
+
+if "last_question_difficulty" not in st.session_state:
+    st.session_state.last_question_difficulty = None
+
+if "last_difficulty_score" not in st.session_state:
+    st.session_state.last_difficulty_score = None
 
 
 # ============================================================
@@ -396,6 +786,20 @@ with st.sidebar:
     st.subheader("Settings")
 
     # --------------------------------------------------------
+    # MODEL SELECTION MODE
+    # --------------------------------------------------------
+
+    model_selection_mode = st.radio(
+        "Model selection",
+        (
+            "Automatic",
+            "Manual",
+        ),
+        horizontal=True,
+        index=0,
+    )
+
+    # --------------------------------------------------------
     # MODEL
     # --------------------------------------------------------
 
@@ -408,7 +812,34 @@ with st.sidebar:
             "groq/compound-mini",
         ),
         index=0,
+        disabled=(
+            model_selection_mode == "Automatic"
+        ),
     )
+
+    # --------------------------------------------------------
+    # AUTOMATIC MODEL INFORMATION
+    # --------------------------------------------------------
+
+    if model_selection_mode == "Automatic":
+
+        st.caption(
+            "Automatic mode selects a model based on question difficulty."
+        )
+
+        if st.session_state.last_selected_model:
+
+            st.caption(
+                "Last selected: "
+                + st.session_state.last_selected_model
+            )
+
+            if st.session_state.last_question_difficulty:
+
+                st.caption(
+                    "Difficulty: "
+                    + st.session_state.last_question_difficulty
+                )
 
     # --------------------------------------------------------
     # STREAMING
@@ -923,6 +1354,48 @@ prompt = st.chat_input(
 if prompt:
 
     # --------------------------------------------------------
+    # SELECT MODEL
+    # --------------------------------------------------------
+
+    if model_selection_mode == "Automatic":
+
+        (
+            selected_model,
+            question_difficulty,
+            difficulty_score,
+        ) = select_model_automatically(
+            prompt
+        )
+
+        st.session_state.last_selected_model = (
+            selected_model
+        )
+
+        st.session_state.last_question_difficulty = (
+            question_difficulty
+        )
+
+        st.session_state.last_difficulty_score = (
+            difficulty_score
+        )
+
+    else:
+
+        selected_model = model
+
+        st.session_state.last_selected_model = (
+            selected_model
+        )
+
+        st.session_state.last_question_difficulty = (
+            "manual"
+        )
+
+        st.session_state.last_difficulty_score = (
+            None
+        )
+
+    # --------------------------------------------------------
     # SAVE USER MESSAGE
     # --------------------------------------------------------
 
@@ -962,7 +1435,7 @@ if prompt:
             try:
 
                 stream = client.chat.completions.create(
-                    model=model,
+                    model=selected_model,
                     messages=request_messages,
                     temperature=creativity,
                     reasoning_effort=reasoning_effort,
@@ -1163,7 +1636,7 @@ if prompt:
                 try:
 
                     response = client.chat.completions.create(
-                        model=model,
+                        model=selected_model,
                         messages=request_messages,
                         temperature=creativity,
                         reasoning_effort=reasoning_effort,
