@@ -637,11 +637,6 @@ with st.sidebar:
         st.rerun()
 
     st.caption(
-        f"{len(st.session_state.messages)} "
-        f"messages have been sent in chat"
-    )
-
-    st.caption(
         f"{brain.count()} chunks inside the chat"
     )
 
