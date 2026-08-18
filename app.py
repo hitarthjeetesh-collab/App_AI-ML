@@ -21,33 +21,45 @@ client = OpenAI(
 db = chromadb.PersistentClient(path="./chromadb")
 brain = db.get_or_create_collection("documents")
 
+
 def chunk_it(text, size=400):
     bits = text.split(". ")
     chunks, current = [], ""
+
     for bit in bits:
         if len(current) + len(bit) < size:
             current += bit + ". "
         else:
             if current.strip():
                 chunks.append(current.strip())
+
             current = bit + ". "
+
     if current.strip():
         chunks.append(current.strip())
+
     return chunks
+
 
 def store_document(file):
     chunks = chunk_it(read_file(file))
-    prefix = file.name.replace(" ", "_")
-    brain.upsert(
-        documents = chunks,
-        ids = [f"{prefix}_{i}" for i in range(len(chunks))],
 
+    prefix = file.name.replace(" ", "_")
+
+    brain.upsert(
+        documents=chunks,
+        ids=[
+            f"{prefix}_{i}"
+            for i in range(len(chunks))
+        ],
     )
+
     return len(chunks)
 
-# ------------------------------------------------------------
+
+# ============================================================
 # TOKEN OPTIMIZATION
-# ------------------------------------------------------------
+# ============================================================
 
 MAX_COMPLETION_TOKENS = 3000
 
@@ -287,14 +299,6 @@ def clean_latex(text):
 
     # --------------------------------------------------------
     # Fix malformed LaTeX line spacing.
-    #
-    # Models sometimes generate:
-    #
-    # \\[4pt]
-    #
-    # which should simply be:
-    #
-    # \\
     # --------------------------------------------------------
 
     text = re.sub(
@@ -326,6 +330,7 @@ def clean_latex(text):
     )
 
     return text
+
 
 def render_markdown(text):
 
@@ -363,6 +368,7 @@ def clean_memory(memory):
     memory = memory.strip()
 
     # Remove accidental memory delimiters.
+
     memory = memory.replace(
         "<memory>",
         "",
@@ -372,6 +378,7 @@ def clean_memory(memory):
     )
 
     # Remove excessive blank lines.
+
     memory = re.sub(
         r"\n{3,}",
         "\n\n",
@@ -379,6 +386,7 @@ def clean_memory(memory):
     )
 
     # Hard character limit.
+
     if len(memory) > MAX_ENGINEERING_MEMORY_CHARS:
 
         memory = memory[
@@ -386,9 +394,11 @@ def clean_memory(memory):
         ]
 
         # Avoid ending in the middle of a line.
+
         last_newline = memory.rfind("\n")
 
         if last_newline > 0:
+
             memory = memory[
                 :last_newline
             ]
@@ -613,11 +623,28 @@ with st.sidebar:
         f"{len(st.session_state.messages)} messages in this chat"
     )
 
+    # ========================================================
+    # DOCUMENT DATABASE
+    # ========================================================
+
     if st.button("clear documents"):
+
         db.delete_collection("documents")
+
+        brain = db.get_or_create_collection(
+            "documents"
+        )
+
         st.rerun()
-    st.caption(f"{len(st.session_state.messages)} messages have been sent in chat")
-    st.caption(f"{brain.count()} chunks inside the chat")
+
+    st.caption(
+        f"{len(st.session_state.messages)} "
+        f"messages have been sent in chat"
+    )
+
+    st.caption(
+        f"{brain.count()} chunks inside the chat"
+    )
 
 
 # ============================================================
@@ -786,17 +813,10 @@ def extract_response(raw_text):
     """
     Separate the user-facing answer from reasoning and memory.
 
-    Supports both:
+    Supports:
 
-    1. Native API reasoning:
-       reasoning is handled separately by the API.
-
-    2. Models that return:
-       <think>
-       reasoning...
-       </think>
-
-    Only the actual answer is returned as the answer.
+    1. Native API reasoning.
+    2. Models returning <think>...</think>.
 
     Returns:
         answer
@@ -827,6 +847,7 @@ def extract_response(raw_text):
         reasoning = match.group(1).strip()
 
         if reasoning:
+
             reasoning_parts.append(
                 reasoning
             )
@@ -837,11 +858,7 @@ def extract_response(raw_text):
     )
 
     # --------------------------------------------------------
-    # HANDLE <think> THAT HAS STARTED BUT HAS NOT CLOSED YET
-    #
-    # This is especially important during streaming.
-    # Anything after an unmatched <think> is treated as
-    # reasoning rather than being shown as the answer.
+    # HANDLE OPEN <think>
     # --------------------------------------------------------
 
     open_think_match = re.search(
@@ -857,6 +874,7 @@ def extract_response(raw_text):
         )
 
         if partial_reasoning:
+
             reasoning_parts.append(
                 partial_reasoning
             )
@@ -890,12 +908,11 @@ def extract_response(raw_text):
     else:
 
         answer = working_text.rstrip()
+
         memory = ""
 
     # --------------------------------------------------------
-    # HANDLE MEMORY THAT HAS STARTED BUT HAS NOT CLOSED YET
-    #
-    # During streaming, don't display the partial memory.
+    # HANDLE OPEN MEMORY
     # --------------------------------------------------------
 
     open_memory_match = re.search(
@@ -1022,14 +1039,16 @@ if rate_limited:
             f"message."
         )
 
-    # Force Streamlit to refresh the countdown.
+    # Force Streamlit to refresh countdown.
+
     time.sleep(1)
+
     st.rerun()
 
 else:
 
-    # Clear expired state.
     st.session_state.rate_limit_until = 0
+
     st.session_state.rate_limit_type = None
 
 
@@ -1039,8 +1058,11 @@ else:
 
 user_input = st.chat_input(
     "Enter your question here:",
-    accept_file = True,
-    file_type = ["pdf", "txt"]
+    accept_file=True,
+    file_type=[
+        "pdf",
+        "txt",
+    ],
 )
 
 
@@ -1049,12 +1071,29 @@ user_input = st.chat_input(
 # ============================================================
 
 if user_input:
+
     prompt = user_input.text
+
+    # --------------------------------------------------------
+    # PROCESS UPLOADED FILES
+    # --------------------------------------------------------
+
     if user_input.files:
+
         for uploaded_file in user_input.files:
-            with st.spinner(f"processing {uploaded_file.name}..."):
-                n = store_document(uploaded_file)
-            st.success(f"processed {uploaded_file.name} into {n} chunks")
+
+            with st.spinner(
+                f"processing {uploaded_file.name}..."
+            ):
+
+                n = store_document(
+                    uploaded_file
+                )
+
+            st.success(
+                f"processed {uploaded_file.name} "
+                f"into {n} chunks"
+            )
 
     # --------------------------------------------------------
     # SAVE USER MESSAGE
@@ -1074,20 +1113,95 @@ if user_input:
     with st.chat_message("user"):
 
         render_markdown(prompt)
-    notes = ""
-    if brain.count() >0 :
-        hits = brain.query(query_texts=[prompt], n_results = n_chunks)
-        notes = "\n\n" + join(hits["documents"][0])
 
-        with st.expander("What I looked up"):
-            for doc, dist in zip(hits["documents"][0], hits["distances"][0]):
-                st.text(f"{dist:.3f}, {doc[:70]}")
-    # --------------------------------------------------------
+    # ========================================================
+    # RAG / DOCUMENT SEARCH
+    # ========================================================
+
+    notes = ""
+
+    if (
+        brain.count() > 0
+        and prompt.strip()
+    ):
+
+        # ----------------------------------------------------
+        # NUMBER OF DOCUMENT CHUNKS TO RETRIEVE
+        # ----------------------------------------------------
+
+        n_chunks = min(
+            5,
+            brain.count(),
+        )
+
+        # ----------------------------------------------------
+        # QUERY CHROMADB
+        # ----------------------------------------------------
+
+        hits = brain.query(
+            query_texts=[prompt],
+            n_results=n_chunks,
+        )
+
+        documents = hits.get(
+            "documents",
+            [[]],
+        )[0]
+
+        distances = hits.get(
+            "distances",
+            [[]],
+        )[0]
+
+        # ----------------------------------------------------
+        # BUILD RAG NOTES
+        # ----------------------------------------------------
+
+        if documents:
+
+            notes = "\n\n".join(
+                documents
+            )
+
+            # ------------------------------------------------
+            # SHOW WHAT WAS RETRIEVED
+            # ------------------------------------------------
+
+            with st.expander(
+                "What I looked up"
+            ):
+
+                for doc, dist in zip(
+                    documents,
+                    distances,
+                ):
+
+                    st.text(
+                        f"{dist:.3f}, "
+                        f"{doc[:70]}"
+                    )
+
+    # ========================================================
     # BUILD OPTIMIZED CONTEXT
-    # --------------------------------------------------------
+    # ========================================================
 
     request_messages = build_messages()
-    notes_prompt = f"use these nots, but only if they are relevant:\n{notes}, to answer: {prompt}" if notes else ""
+
+    if notes:
+
+        notes_prompt = (
+            "Use these notes only if they are relevant "
+            "to the user's question.\n\n"
+            "DOCUMENT NOTES:\n"
+            f"{notes}\n\n"
+            "USER QUESTION:\n"
+            f"{prompt}"
+        )
+
+    else:
+
+        notes_prompt = ""
+
     # ========================================================
     # ASSISTANT
     # ========================================================
@@ -1102,10 +1216,34 @@ if user_input:
 
             try:
 
+                # --------------------------------------------
+                # COPY NORMAL CHAT CONTEXT
+                # --------------------------------------------
+
+                stream_messages = (
+                    request_messages.copy()
+                )
+
+                # --------------------------------------------
+                # ADD RAG CONTEXT
+                # --------------------------------------------
+
+                if notes_prompt:
+
+                    stream_messages.append(
+                        {
+                            "role": "user",
+                            "content": notes_prompt,
+                        }
+                    )
+
+                # --------------------------------------------
+                # API REQUEST
+                # --------------------------------------------
+
                 stream = client.chat.completions.create(
                     model=model,
-                    messages=[request_messages,
-                              {"role":"user","content": notes_prompt}],
+                    messages=stream_messages,
                     temperature=creativity,
                     reasoning_effort=reasoning_effort,
                     max_completion_tokens=MAX_COMPLETION_TOKENS,
@@ -1123,7 +1261,9 @@ if user_input:
                     is not None
                 ):
 
-                    cooldown = handle_rate_limit_error(e)
+                    cooldown = (
+                        handle_rate_limit_error(e)
+                    )
 
                     limit_type = (
                         st.session_state.rate_limit_type
@@ -1134,8 +1274,9 @@ if user_input:
 
                         st.warning(
                             f"**Temporary token limit reached.**\n\n"
-                            f"This model has reached its tokens-per-minute "
-                            f"limit. Your message was not lost.\n\n"
+                            f"This model has reached its "
+                            f"tokens-per-minute limit. "
+                            f"Your message was not lost.\n\n"
                             f"Please try again in approximately "
                             f"**{cooldown} seconds**."
                         )
@@ -1144,7 +1285,8 @@ if user_input:
 
                         st.warning(
                             f"**Temporary request limit reached.**\n\n"
-                            f"Too many requests were sent to this model.\n\n"
+                            f"Too many requests were sent "
+                            f"to this model.\n\n"
                             f"Please try again in approximately "
                             f"**{cooldown} seconds**."
                         )
@@ -1153,9 +1295,10 @@ if user_input:
 
                         st.error(
                             "**Daily model limit reached.**\n\n"
-                            "This model has reached its daily usage "
-                            "limit. Please use another model or wait "
-                            "for the provider's daily reset."
+                            "This model has reached its daily "
+                            "usage limit. Please use another "
+                            "model or wait for the provider's "
+                            "daily reset."
                         )
 
                     else:
@@ -1177,9 +1320,9 @@ if user_input:
 
                 st.stop()
 
-            # ------------------------------------------------
+            # =================================================
             # ENGINEERING PROCESS
-            # ------------------------------------------------
+            # =================================================
 
             with st.expander(
                 "Engineering Process",
@@ -1188,30 +1331,35 @@ if user_input:
 
                 thinking_placeholder = st.empty()
 
-            # ------------------------------------------------
+            # =================================================
             # ANSWER
-            # ------------------------------------------------
+            # =================================================
 
             answer_placeholder = st.empty()
 
             reasoning_text = ""
+
             inline_reasoning_text = ""
+
             raw_answer_text = ""
 
-            # ------------------------------------------------
+            # =================================================
             # STREAM
-            # ------------------------------------------------
+            # =================================================
 
             for chunk in stream:
 
                 if not chunk.choices:
+
                     continue
 
-                delta = chunk.choices[0].delta
+                delta = (
+                    chunk.choices[0].delta
+                )
 
-                # ============================================
+                # =============================================
                 # NATIVE API REASONING
-                # ============================================
+                # =============================================
 
                 reasoning = getattr(
                     delta,
@@ -1223,9 +1371,9 @@ if user_input:
 
                     reasoning_text += reasoning
 
-                # ============================================
+                # =============================================
                 # FINAL RESPONSE
-                # ============================================
+                # =============================================
 
                 content = getattr(
                     delta,
@@ -1237,17 +1385,14 @@ if user_input:
 
                     raw_answer_text += content
 
-                # ============================================
+                # =============================================
                 # PARSE CONTENT
-                #
-                # This catches models that put reasoning inside
-                # <think>...</think>.
-                # ============================================
+                # =============================================
 
                 (
                     visible_answer,
                     inline_reasoning,
-                    _
+                    _,
                 ) = extract_response(
                     raw_answer_text
                 )
@@ -1256,9 +1401,9 @@ if user_input:
                     inline_reasoning
                 )
 
-                # ============================================
+                # =============================================
                 # DISPLAY ENGINEERING PROCESS
-                # ============================================
+                # =============================================
 
                 combined_reasoning_parts = []
 
@@ -1284,9 +1429,9 @@ if user_input:
                         )
                     )
 
-                # ============================================
+                # =============================================
                 # DISPLAY FINAL ANSWER
-                # ============================================
+                # =============================================
 
                 answer_placeholder.markdown(
                     clean_latex(
@@ -1294,9 +1439,9 @@ if user_input:
                     )
                 )
 
-            # ------------------------------------------------
+            # =================================================
             # FINAL EXTRACTION
-            # ------------------------------------------------
+            # =================================================
 
             (
                 answer_text,
@@ -1306,9 +1451,9 @@ if user_input:
                 raw_answer_text
             )
 
-            # ------------------------------------------------
+            # =================================================
             # UPDATE MEMORY
-            # ------------------------------------------------
+            # =================================================
 
             if new_memory:
 
@@ -1316,9 +1461,9 @@ if user_input:
                     new_memory
                 )
 
-            # ------------------------------------------------
+            # =================================================
             # REASONING FALLBACK
-            # ------------------------------------------------
+            # =================================================
 
             combined_reasoning_parts = []
 
@@ -1350,9 +1495,9 @@ if user_input:
                     "*No separate reasoning was returned by the model.*"
                 )
 
-            # ------------------------------------------------
+            # =================================================
             # SAVE FINAL ANSWER
-            # ------------------------------------------------
+            # =================================================
 
             st.session_state.messages.append(
                 {
@@ -1373,9 +1518,34 @@ if user_input:
 
                 try:
 
+                    # ----------------------------------------
+                    # COPY NORMAL CHAT CONTEXT
+                    # ----------------------------------------
+
+                    response_messages = (
+                        request_messages.copy()
+                    )
+
+                    # ----------------------------------------
+                    # ADD RAG CONTEXT
+                    # ----------------------------------------
+
+                    if notes_prompt:
+
+                        response_messages.append(
+                            {
+                                "role": "user",
+                                "content": notes_prompt,
+                            }
+                        )
+
+                    # ----------------------------------------
+                    # API REQUEST
+                    # ----------------------------------------
+
                     response = client.chat.completions.create(
                         model=model,
-                        messages=request_messages,
+                        messages=response_messages,
                         temperature=creativity,
                         reasoning_effort=reasoning_effort,
                         max_completion_tokens=MAX_COMPLETION_TOKENS,
@@ -1392,7 +1562,9 @@ if user_input:
                         is not None
                     ):
 
-                        cooldown = handle_rate_limit_error(e)
+                        cooldown = (
+                            handle_rate_limit_error(e)
+                        )
 
                         limit_type = (
                             st.session_state.rate_limit_type
@@ -1403,8 +1575,9 @@ if user_input:
 
                             st.warning(
                                 f"**Temporary token limit reached.**\n\n"
-                                f"This model has reached its tokens-per-minute "
-                                f"limit. Your message was not lost.\n\n"
+                                f"This model has reached its "
+                                f"tokens-per-minute limit. "
+                                f"Your message was not lost.\n\n"
                                 f"Please try again in approximately "
                                 f"**{cooldown} seconds**."
                             )
@@ -1413,7 +1586,8 @@ if user_input:
 
                             st.warning(
                                 f"**Temporary request limit reached.**\n\n"
-                                f"Too many requests were sent to this model.\n\n"
+                                f"Too many requests were sent "
+                                f"to this model.\n\n"
                                 f"Please try again in approximately "
                                 f"**{cooldown} seconds**."
                             )
@@ -1422,9 +1596,10 @@ if user_input:
 
                             st.error(
                                 "**Daily model limit reached.**\n\n"
-                                "This model has reached its daily usage "
-                                "limit. Please use another model or wait "
-                                "for the provider's daily reset."
+                                "This model has reached its daily "
+                                "usage limit. Please use another "
+                                "model or wait for the provider's "
+                                "daily reset."
                             )
 
                         else:
@@ -1446,9 +1621,9 @@ if user_input:
 
                     st.stop()
 
-            # ------------------------------------------------
+            # =================================================
             # RAW RESPONSE
-            # ------------------------------------------------
+            # =================================================
 
             raw_response = (
                 response
@@ -1458,9 +1633,9 @@ if user_input:
                 or ""
             )
 
-            # ------------------------------------------------
+            # =================================================
             # EXTRACT ANSWER + REASONING + MEMORY
-            # ------------------------------------------------
+            # =================================================
 
             (
                 answer_text,
@@ -1470,9 +1645,9 @@ if user_input:
                 raw_response
             )
 
-            # ------------------------------------------------
+            # =================================================
             # UPDATE MEMORY
-            # ------------------------------------------------
+            # =================================================
 
             if new_memory:
 
@@ -1480,9 +1655,9 @@ if user_input:
                     new_memory
                 )
 
-            # ------------------------------------------------
+            # =================================================
             # GET NATIVE API REASONING
-            # ------------------------------------------------
+            # =================================================
 
             reasoning_text = getattr(
                 response.choices[0].message,
@@ -1490,9 +1665,9 @@ if user_input:
                 None,
             )
 
-            # ------------------------------------------------
+            # =================================================
             # ENGINEERING PROCESS
-            # ------------------------------------------------
+            # =================================================
 
             with st.expander(
                 "Engineering Process",
@@ -1527,21 +1702,21 @@ if user_input:
                         "*No reasoning was returned.*"
                     )
 
-            # ------------------------------------------------
+            # =================================================
             # DISPLAY ANSWER
-            # ------------------------------------------------
+            # =================================================
 
             render_markdown(
                 answer_text
             )
 
-            # ------------------------------------------------
+            # =================================================
             # SAVE ANSWER
-            # ------------------------------------------------
+            # =================================================
 
             st.session_state.messages.append(
                 {
                     "role": "assistant",
-                    "content": answer_text
+                    "content": answer_text,
                 }
             )
