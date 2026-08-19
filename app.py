@@ -519,6 +519,35 @@ with st.sidebar:
         index=0,
     )
 
+    CURRENCIES = {
+        "USD": ("$", "US Dollar"),
+        "EUR": ("€", "Euro"),
+        "GBP": ("£", "British Pound"),
+        "CAD": ("C$", "Canadian Dollar"),
+        "AUD": ("A$", "Australian Dollar"),
+        "JPY": ("¥", "Japanese Yen"),
+        "CNY": ("¥", "Chinese Yuan"),
+        "CHF": ("CHF", "Swiss Franc"),
+        "INR": ("₹", "Indian Rupee"),
+        "KRW": ("₩", "South Korean Won"),
+        "BRL": ("R$", "Brazilian Real"),
+        "MXN": ("MX$", "Mexican Peso"),
+        "SGD": ("S$", "Singapore Dollar"),
+        "HKD": ("HK$", "Hong Kong Dollar"),
+        "NZD": ("NZ$", "New Zealand Dollar"),
+        "SEK": ("kr", "Swedish Krona"),
+        "AED": ("د.إ", "UAE Dirham"),
+        "ZAR": ("R", "South African Rand"),
+    }
+
+    currency = st.selectbox(
+        "Currency",
+        options=list(CURRENCIES.keys()),
+        format_func=lambda code: (
+            f"{CURRENCIES[code][0]}  {code} — {CURRENCIES[code][1]}"
+        ),
+    )
+
     # ========================================================
     # ENGINEERING PRIORITIES
     # ========================================================
