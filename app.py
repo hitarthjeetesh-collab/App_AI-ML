@@ -549,8 +549,8 @@ with st.sidebar:
     )
 
     TEMPREATURE = {
-        "°C": ("Celsius"),
-        "°F": ("Fahrenheit"),
+        "°C": ("", "Celsius"),
+        "°F": ("", "Fahrenheit"),
     }
 
     temperature = st.selectbox(
