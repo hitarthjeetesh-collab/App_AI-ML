@@ -221,7 +221,18 @@ st.set_page_config(
     page_icon="assets/Firefly.png",
     layout="wide",
 )
+st.markdown("""
+<style>
 
+section[data-testid="stSidebar"] {
+    background: rgba(20, 28, 36, 0.75);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+</style>
+""", unsafe_allow_html=True)
 # ============================================================
 # SESSION STATE 
 # ============================================================ 
