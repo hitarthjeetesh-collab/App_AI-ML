@@ -78,11 +78,11 @@ def store_messages(question, answer):
 # TOKEN OPTIMIZATION
 # ============================================================
 
-MAX_COMPLETION_TOKENS = 3500
+MAX_COMPLETION_TOKENS = 3000
 
 MAX_HISTORY_MESSAGES = 10
 
-MAX_ENGINEERING_MEMORY_CHARS = 30000
+MAX_ENGINEERING_MEMORY_CHARS = 3000
 
 
 # ============================================================
@@ -1235,7 +1235,7 @@ if user_input:
         # ----------------------------------------------------
 
         n_chat_chunks = min(
-            10,
+            5,
             memory.count(),
         )
 
