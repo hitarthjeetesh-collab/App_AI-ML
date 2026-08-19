@@ -436,24 +436,25 @@ with st.sidebar:
     st.markdown(
         """
         <style>
-        /* Red destructive buttons */
-        button[kind="secondary"]:has(p) {
-            transition: background-color 0.15s ease,
-                       border-color 0.15s ease,
-                       color 0.15s ease;
+        /* Only Streamlit primary buttons are red.
+           The four destructive buttons below use type="primary". */
+
+        button[kind="primary"] {
+            background-color: #d32f2f !important;
+            border-color: #d32f2f !important;
+            color: white !important;
         }
 
-        /* Clear engineering memory */
-        div[data-testid="stButton"]:has(
-            button p:first-child
-        ) button {
-            /* Styling is applied below through the
-               individual button containers */
+        button[kind="primary"]:hover {
+            background-color: #b71c1c !important;
+            border-color: #b71c1c !important;
+            color: white !important;
         }
 
-        /* Target buttons by their displayed text */
-        div[data-testid="stButton"] button:has(p) {
-            /* Keep normal buttons unchanged */
+        button[kind="primary"]:active {
+            background-color: #a51c1c !important;
+            border-color: #a51c1c !important;
+            color: white !important;
         }
         </style>
         """,
@@ -657,6 +658,7 @@ with st.sidebar:
     if st.button(
         "Clear engineering memory",
         use_container_width=True,
+        type="primary",
     ):
 
         st.session_state.engineering_memory = ""
@@ -692,6 +694,7 @@ with st.sidebar:
     if st.button(
         "Clear chat",
         use_container_width=True,
+        type="primary",
     ):
 
         st.session_state.messages = []
@@ -712,7 +715,8 @@ with st.sidebar:
     # ========================================================
 
     if st.button(
-        "clear documents"
+        "clear documents",
+        type="primary",
     ):
 
         db.delete_collection(
@@ -734,7 +738,8 @@ with st.sidebar:
     # ========================================================
 
     if st.button(
-        "Clear all past chats"
+        "Clear all past chats",
+        type="primary",
     ):
 
         db.delete_collection(
@@ -749,42 +754,6 @@ with st.sidebar:
 
     st.caption(
         f"{memory.count()} past chats stored in the database"
-    )
-
-    # ========================================================
-    # APPLY RED STYLE TO ONLY THE FOUR DESTRUCTIVE BUTTONS
-    # ========================================================
-
-    st.markdown(
-        """
-        <script>
-        const destructiveButtons = [
-            "Clear engineering memory",
-            "Clear chat",
-            "clear documents",
-            "Clear all past chats"
-        ];
-
-        function styleDestructiveButtons() {
-            const buttons = document.querySelectorAll(
-                'div[data-testid="stButton"] button'
-            );
-
-            buttons.forEach(button => {
-                const text = button.innerText.trim();
-
-                if (destructiveButtons.includes(text)) {
-                    button.style.backgroundColor = "#d32f2f";
-                    button.style.color = "white";
-                    button.style.borderColor = "#d32f2f";
-                }
-            });
-        }
-
-        styleDestructiveButtons();
-        </script>
-        """,
-        unsafe_allow_html=True,
     )
 
 
