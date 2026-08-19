@@ -78,7 +78,7 @@ def store_messages(question, answer):
 # TOKEN OPTIMIZATION
 # ============================================================
 
-MAX_COMPLETION_TOKENS = 5000
+MAX_COMPLETION_TOKENS = 3500
 
 MAX_HISTORY_MESSAGES = 10
 
