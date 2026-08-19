@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 import chromadb
 from doc_helper import read_file
+from formula_library import get_relevant_formulas
 import time
 
 
@@ -20,725 +21,32 @@ client = OpenAI(
 )
 
 db = chromadb.PersistentClient(path="./chromadb")
-
 brain = db.get_or_create_collection("documents")
 memory = db.get_or_create_collection("converstations")
-formulas = db.get_or_create_collection("formulas")
 
 
 # ============================================================
 # TOKEN OPTIMIZATION
 # ============================================================
 
-# Maximum generated tokens.
 MAX_COMPLETION_TOKENS = 3000
 
-# Number of recent chat messages sent to the model.
 MAX_HISTORY_MESSAGES = 6
 
-# Maximum engineering memory size.
 MAX_ENGINEERING_MEMORY_CHARS = 1500
 
-# Document retrieval.
 MAX_DOCUMENT_CHUNKS = 4
 
-# Past-chat retrieval.
 MAX_CHAT_CHUNKS = 3
 
-# Formula retrieval.
-MAX_FORMULA_CHUNKS = 4
-
-# Maximum amount of retrieved document text sent to the model.
 MAX_DOCUMENT_CONTEXT_CHARS = 7000
 
-# Maximum amount of retrieved past-chat text sent to the model.
 MAX_CHAT_CONTEXT_CHARS = 4500
 
-# Maximum amount of retrieved formula text sent to the model.
-MAX_FORMULA_CONTEXT_CHARS = 2500
-
-# Maximum amount of an old assistant answer stored in the
-# searchable conversation database.
 MAX_STORED_ANSWER_CHARS = 1200
 
-
-# ============================================================
-# ENGINEERING FORMULA DATABASE
-# ============================================================
-
-FORMULA_LIBRARY = [
-    # ========================================================
-    # MECHANICS
-    # ========================================================
-
-    {
-        "id": "mechanics_newtons_second_law",
-        "name": "Newton's Second Law",
-        "category": "mechanics",
-        "text": """Name: Newton's Second Law
-Category: mechanics
-Formula: F = ma
-Variables: F = net force, m = mass, a = acceleration
-Units: N, kg, m/s²
-Use: Calculate net force from mass and acceleration.""",
-    },
-
-    {
-        "id": "mechanics_weight",
-        "name": "Weight",
-        "category": "mechanics",
-        "text": """Name: Weight
-Category: mechanics
-Formula: W = mg
-Variables: W = weight force, m = mass, g = gravitational acceleration
-Units: N, kg, m/s²
-Use: Calculate gravitational force on a mass.""",
-    },
-
-    {
-        "id": "mechanics_torque",
-        "name": "Torque",
-        "category": "mechanics",
-        "text": """Name: Torque
-Category: mechanics
-Formula: τ = Fr
-More generally: τ = Fr sin(θ)
-Variables: τ = torque, F = force, r = perpendicular lever arm, θ = angle between force and lever arm
-Units: N·m, N, m
-Use: Calculate torque produced by a force.""",
-    },
-
-    {
-        "id": "mechanics_power_from_torque",
-        "name": "Rotational Power",
-        "category": "mechanics",
-        "text": """Name: Rotational Power
-Formula: P = τω
-Variables: P = power, τ = torque, ω = angular velocity
-Units: W, N·m, rad/s
-Use: Calculate mechanical power from torque and angular speed.""",
-    },
-
-    {
-        "id": "mechanics_linear_power",
-        "name": "Linear Mechanical Power",
-        "category": "mechanics",
-        "text": """Name: Linear Mechanical Power
-Formula: P = Fv
-Variables: P = mechanical power, F = force, v = linear velocity
-Units: W, N, m/s
-Use: Calculate mechanical power required to apply a force at a velocity.""",
-    },
-
-    {
-        "id": "mechanics_work",
-        "name": "Mechanical Work",
-        "category": "mechanics",
-        "text": """Name: Mechanical Work
-Formula: W = Fd cos(θ)
-Variables: W = work, F = force, d = displacement, θ = angle between force and displacement
-Units: J, N, m
-Use: Calculate work performed by a force.""",
-    },
-
-    {
-        "id": "mechanics_kinetic_energy",
-        "name": "Translational Kinetic Energy",
-        "category": "mechanics",
-        "text": """Name: Translational Kinetic Energy
-Formula: KE = 1/2 mv²
-Variables: KE = kinetic energy, m = mass, v = velocity
-Units: J, kg, m/s
-Use: Calculate translational kinetic energy.""",
-    },
-
-    {
-        "id": "mechanics_rotational_kinetic_energy",
-        "name": "Rotational Kinetic Energy",
-        "category": "mechanics",
-        "text": """Name: Rotational Kinetic Energy
-Formula: KE_rot = 1/2 Iω²
-Variables: KE_rot = rotational kinetic energy, I = moment of inertia, ω = angular velocity
-Units: J, kg·m², rad/s
-Use: Calculate rotational kinetic energy.""",
-    },
-
-    {
-        "id": "mechanics_momentum",
-        "name": "Linear Momentum",
-        "category": "mechanics",
-        "text": """Name: Linear Momentum
-Formula: p = mv
-Variables: p = momentum, m = mass, v = velocity
-Units: kg·m/s, kg, m/s
-Use: Calculate linear momentum.""",
-    },
-
-    {
-        "id": "mechanics_impulse",
-        "name": "Impulse",
-        "category": "mechanics",
-        "text": """Name: Impulse
-Formula: J = FΔt = Δp
-Variables: J = impulse, F = force, Δt = time interval, Δp = change in momentum
-Units: N·s
-Use: Relate applied force and time to change in momentum.""",
-    },
-
-    {
-        "id": "mechanics_friction",
-        "name": "Friction",
-        "category": "mechanics",
-        "text": """Name: Friction
-Formula: F_f = μN
-Variables: F_f = friction force, μ = coefficient of friction, N = normal force
-Units: N
-Use: Estimate sliding or rolling-contact friction when the appropriate coefficient is known.""",
-    },
-
-    {
-        "id": "mechanics_spring_force",
-        "name": "Hooke's Law",
-        "category": "mechanics",
-        "text": """Name: Hooke's Law
-Formula: F = kx
-Variables: F = spring force, k = spring constant, x = displacement from equilibrium
-Units: N, N/m, m
-Use: Calculate force produced by a linear spring.""",
-    },
-
-    {
-        "id": "mechanics_spring_energy",
-        "name": "Spring Potential Energy",
-        "category": "mechanics",
-        "text": """Name: Spring Potential Energy
-Formula: E = 1/2 kx²
-Variables: E = stored energy, k = spring constant, x = displacement
-Units: J, N/m, m
-Use: Calculate energy stored in a linear spring.""",
-    },
-
-    {
-        "id": "mechanics_stress",
-        "name": "Normal Stress",
-        "category": "mechanics",
-        "text": """Name: Normal Stress
-Formula: σ = F/A
-Variables: σ = normal stress, F = axial force, A = cross-sectional area
-Units: Pa, N, m²
-Use: Calculate average normal stress in a member.""",
-    },
-
-    {
-        "id": "mechanics_strain",
-        "name": "Normal Strain",
-        "category": "mechanics",
-        "text": """Name: Normal Strain
-Formula: ε = ΔL/L
-Variables: ε = strain, ΔL = change in length, L = original length
-Units: dimensionless
-Use: Calculate axial deformation strain.""",
-    },
-
-    {
-        "id": "mechanics_hookes_material",
-        "name": "Hooke's Law for Materials",
-        "category": "mechanics",
-        "text": """Name: Hooke's Law for Linear Elastic Materials
-Formula: σ = Eε
-Variables: σ = stress, E = Young's modulus, ε = strain
-Units: Pa
-Use: Relate stress and strain in the linear elastic region.""",
-    },
-
-    {
-        "id": "mechanics_bending_stress",
-        "name": "Bending Stress",
-        "category": "mechanics",
-        "text": """Name: Bending Stress
-Formula: σ = Mc/I
-Variables: σ = bending stress, M = bending moment, c = distance from neutral axis, I = second moment of area
-Units: Pa, N·m, m, m⁴
-Use: Calculate bending stress in a beam.""",
-    },
-
-    {
-        "id": "mechanics_factor_of_safety",
-        "name": "Factor of Safety",
-        "category": "mechanics",
-        "text": """Name: Factor of Safety
-Formula: FoS = failure strength / applied stress
-Variables: FoS = factor of safety
-Use: Compare material/component strength with applied loading.""",
-    },
-
-    {
-        "id": "mechanics_centripetal_force",
-        "name": "Centripetal Force",
-        "category": "mechanics",
-        "text": """Name: Centripetal Force
-Formula: F_c = mv²/r
-Equivalent: F_c = mω²r
-Variables: F_c = centripetal force, m = mass, v = tangential velocity, r = radius, ω = angular velocity
-Units: N
-Use: Calculate radial force required for circular motion.""",
-    },
-
-    # ========================================================
-    # KINEMATICS
-    # ========================================================
-
-    {
-        "id": "kinematics_velocity",
-        "name": "Average Velocity",
-        "category": "kinematics",
-        "text": """Name: Average Velocity
-Formula: v = Δx/Δt
-Variables: v = average velocity, Δx = displacement, Δt = time
-Units: m/s
-Use: Calculate average velocity.""",
-    },
-
-    {
-        "id": "kinematics_acceleration",
-        "name": "Average Acceleration",
-        "category": "kinematics",
-        "text": """Name: Average Acceleration
-Formula: a = Δv/Δt
-Variables: a = acceleration, Δv = change in velocity, Δt = time
-Units: m/s²
-Use: Calculate average acceleration.""",
-    },
-
-    {
-        "id": "kinematics_position",
-        "name": "Constant Acceleration Position",
-        "category": "kinematics",
-        "text": """Name: Constant Acceleration Position
-Formula: x = x₀ + v₀t + 1/2 at²
-Variables: x = final position, x₀ = initial position, v₀ = initial velocity, a = acceleration, t = time
-Use: Calculate position under constant acceleration.""",
-    },
-
-    {
-        "id": "kinematics_velocity_time",
-        "name": "Constant Acceleration Velocity",
-        "category": "kinematics",
-        "text": """Name: Constant Acceleration Velocity
-Formula: v = v₀ + at
-Variables: v = final velocity, v₀ = initial velocity, a = acceleration, t = time
-Use: Calculate velocity under constant acceleration.""",
-    },
-
-    {
-        "id": "kinematics_velocity_position",
-        "name": "Velocity Without Time",
-        "category": "kinematics",
-        "text": """Name: Velocity-Position Relation
-Formula: v² = v₀² + 2aΔx
-Variables: v = final velocity, v₀ = initial velocity, a = acceleration, Δx = displacement
-Use: Calculate velocity when time is not directly known.""",
-    },
-
-    # ========================================================
-    # ROTATIONAL MOTION
-    # ========================================================
-
-    {
-        "id": "rotation_angular_velocity",
-        "name": "Angular Velocity",
-        "category": "rotational motion",
-        "text": """Name: Angular Velocity
-Formula: ω = Δθ/Δt
-Variables: ω = angular velocity, Δθ = angular displacement, Δt = time
-Units: rad/s
-Use: Calculate angular velocity.""",
-    },
-
-    {
-        "id": "rotation_rpm_to_rad_s",
-        "name": "RPM to Angular Velocity",
-        "category": "rotational motion",
-        "text": """Name: RPM to Angular Velocity
-Formula: ω = RPM × 2π/60
-Variables: ω = angular velocity in rad/s
-Use: Convert rotational speed from RPM to rad/s.""",
-    },
-
-    {
-        "id": "rotation_linear_speed",
-        "name": "Rotational to Linear Speed",
-        "category": "rotational motion",
-        "text": """Name: Rotational to Linear Speed
-Formula: v = rω
-Variables: v = tangential velocity, r = radius, ω = angular velocity
-Units: m/s
-Use: Calculate linear speed at a rotating radius.""",
-    },
-
-    {
-        "id": "rotation_gear_ratio",
-        "name": "Gear Ratio",
-        "category": "rotational motion",
-        "text": """Name: Gear Ratio
-Formula: G = N_out/N_in
-Ideal speed relation: ω_out = ω_in/G
-Ideal torque relation: τ_out = τ_in G
-Variables: G = gear ratio, N = gear tooth count
-Use: Calculate ideal speed and torque changes through gearing.""",
-    },
-
-    # ========================================================
-    # MOTORS
-    # ========================================================
-
-    {
-        "id": "motor_mechanical_power",
-        "name": "Motor Mechanical Power",
-        "category": "motors",
-        "text": """Name: Motor Mechanical Power
-Formula: P_mech = τω
-Variables: P_mech = mechanical output power, τ = shaft torque, ω = shaft angular velocity
-Units: W, N·m, rad/s
-Use: Calculate mechanical output power of a motor.""",
-    },
-
-    {
-        "id": "motor_efficiency",
-        "name": "Motor Efficiency",
-        "category": "motors",
-        "text": """Name: Motor Efficiency
-Formula: η = P_out/P_in
-Variables: η = efficiency, P_out = output power, P_in = input power
-Use: Calculate motor efficiency.""",
-    },
-
-    {
-        "id": "motor_input_power",
-        "name": "Motor Input Power",
-        "category": "motors",
-        "text": """Name: Motor Input Power
-Formula: P_in = VI
-Variables: P_in = electrical input power, V = voltage, I = current
-Units: W
-Use: Calculate electrical power entering a motor/controller.""",
-    },
-
-    {
-        "id": "motor_output_from_efficiency",
-        "name": "Motor Output Power from Efficiency",
-        "category": "motors",
-        "text": """Name: Motor Output Power from Efficiency
-Formula: P_out = ηP_in
-Variables: P_out = mechanical output power, η = efficiency, P_in = electrical input power
-Use: Estimate mechanical output power from electrical input power and efficiency.""",
-    },
-
-    # ========================================================
-    # ELECTRICAL
-    # ========================================================
-
-    {
-        "id": "electrical_power",
-        "name": "Electrical Power",
-        "category": "electrical",
-        "text": """Name: Electrical Power
-Formula: P = VI
-Variables: P = power, V = voltage, I = current
-Units: W, V, A
-Use: Calculate DC electrical power.""",
-    },
-
-    {
-        "id": "electrical_ohms_law",
-        "name": "Ohm's Law",
-        "category": "electrical",
-        "text": """Name: Ohm's Law
-Formula: V = IR
-Equivalent: I = V/R and R = V/I
-Variables: V = voltage, I = current, R = resistance
-Units: V, A, Ω
-Use: Relate voltage, current, and resistance.""",
-    },
-
-    {
-        "id": "electrical_power_resistance",
-        "name": "Resistive Power",
-        "category": "electrical",
-        "text": """Name: Resistive Power
-Formulas: P = I²R and P = V²/R
-Variables: P = power, I = current, R = resistance, V = voltage
-Units: W, A, Ω, V
-Use: Calculate power dissipated by resistance.""",
-    },
-
-    {
-        "id": "electrical_energy",
-        "name": "Electrical Energy",
-        "category": "electrical",
-        "text": """Name: Electrical Energy
-Formula: E = Pt
-Variables: E = energy, P = power, t = time
-Units: J when P is W and t is seconds; Wh when P is W and t is hours
-Use: Calculate energy consumption.""",
-    },
-
-    {
-        "id": "electrical_series_resistance",
-        "name": "Series Resistance",
-        "category": "electrical",
-        "text": """Name: Series Resistance
-Formula: R_total = R₁ + R₂ + ... + Rₙ
-Use: Calculate total resistance of resistors connected in series.""",
-    },
-
-    {
-        "id": "electrical_parallel_resistance",
-        "name": "Parallel Resistance",
-        "category": "electrical",
-        "text": """Name: Parallel Resistance
-Formula: 1/R_total = 1/R₁ + 1/R₂ + ... + 1/Rₙ
-For two resistors: R_total = R₁R₂/(R₁ + R₂)
-Use: Calculate equivalent resistance of parallel resistors.""",
-    },
-
-    # ========================================================
-    # BATTERIES
-    # ========================================================
-
-    {
-        "id": "battery_energy_wh",
-        "name": "Battery Energy",
-        "category": "batteries",
-        "text": """Name: Battery Energy
-Approximate formula: E = V_nom Ah
-Variables: E = nominal energy, V_nom = nominal voltage, Ah = capacity
-Units: Wh
-Use: Estimate nominal battery energy.""",
-    },
-
-    {
-        "id": "battery_runtime",
-        "name": "Battery Runtime",
-        "category": "batteries",
-        "text": """Name: Battery Runtime
-Approximate formula: t = E/P
-Variables: t = runtime, E = usable battery energy, P = average load power
-Units: hours when E is Wh and P is W
-Use: Estimate runtime.""",
-    },
-
-    {
-        "id": "battery_current_power",
-        "name": "Battery Current from Power",
-        "category": "batteries",
-        "text": """Name: Battery Current from Power
-Formula: I = P/V
-Variables: I = current, P = electrical power, V = voltage
-Units: A, W, V
-Use: Estimate battery current from electrical power.""",
-    },
-
-    {
-        "id": "battery_usable_energy",
-        "name": "Usable Battery Energy",
-        "category": "batteries",
-        "text": """Name: Usable Battery Energy
-Approximate formula: E_usable = E_nom η_system DOD
-Variables: E_usable = usable energy, E_nom = nominal energy, η_system = system efficiency, DOD = usable depth-of-discharge fraction
-Use: Estimate practical energy available from a battery.""",
-    },
-
-    {
-        "id": "battery_c_rate",
-        "name": "Battery C-Rate Current",
-        "category": "batteries",
-        "text": """Name: Battery C-Rate
-Formula: I = C_rate × capacity_Ah
-Variables: I = approximate current, C_rate = C rating, capacity_Ah = battery capacity
-Units: A
-Use: Estimate current corresponding to a battery C-rate.""",
-    },
-
-    # ========================================================
-    # CAPACITORS
-    # ========================================================
-
-    {
-        "id": "capacitor_charge",
-        "name": "Capacitor Charge",
-        "category": "electronics",
-        "text": """Name: Capacitor Charge
-Formula: Q = CV
-Variables: Q = charge, C = capacitance, V = voltage
-Units: C, F, V
-Use: Calculate charge stored in a capacitor.""",
-    },
-
-    {
-        "id": "capacitor_energy",
-        "name": "Capacitor Energy",
-        "category": "electronics",
-        "text": """Name: Capacitor Energy
-Formula: E = 1/2 CV²
-Variables: E = stored energy, C = capacitance, V = voltage
-Units: J, F, V
-Use: Calculate energy stored in a capacitor.""",
-    },
-
-    # ========================================================
-    # THERMAL
-    # ========================================================
-
-    {
-        "id": "thermal_heat",
-        "name": "Sensible Heat",
-        "category": "thermal",
-        "text": """Name: Sensible Heat
-Formula: Q = mcΔT
-Variables: Q = heat energy, m = mass, c = specific heat capacity, ΔT = temperature change
-Units: J, kg, J/(kg·K), K
-Use: Calculate energy required to change the temperature of a material.""",
-    },
-
-    {
-        "id": "thermal_conduction",
-        "name": "Thermal Conduction",
-        "category": "thermal",
-        "text": """Name: Thermal Conduction
-Formula: Q_dot = kAΔT/L
-Variables: Q_dot = heat transfer rate, k = thermal conductivity, A = area, ΔT = temperature difference, L = conduction length
-Units: W
-Use: Estimate steady-state conduction heat transfer.""",
-    },
-
-    {
-        "id": "thermal_power_loss",
-        "name": "Thermal Power Loss",
-        "category": "thermal",
-        "text": """Name: Resistive Thermal Loss
-Formula: P_loss = I²R
-Variables: P_loss = heat generation, I = current, R = resistance
-Units: W
-Use: Calculate resistive electrical heating.""",
-    },
-
-    # ========================================================
-    # FLUIDS
-    # ========================================================
-
-    {
-        "id": "fluid_pressure",
-        "name": "Hydrostatic Pressure",
-        "category": "fluids",
-        "text": """Name: Hydrostatic Pressure
-Formula: P = ρgh
-Variables: P = pressure increase, ρ = fluid density, g = gravitational acceleration, h = depth
-Units: Pa, kg/m³, m/s², m
-Use: Calculate hydrostatic pressure.""",
-    },
-
-    {
-        "id": "fluid_flow_rate",
-        "name": "Volumetric Flow Rate",
-        "category": "fluids",
-        "text": """Name: Volumetric Flow Rate
-Formula: Q = Av
-Variables: Q = volumetric flow rate, A = cross-sectional area, v = average fluid velocity
-Units: m³/s
-Use: Calculate volumetric flow rate.""",
-    },
-
-    # ========================================================
-    # CONTROL SYSTEMS
-    # ========================================================
-
-    {
-        "id": "control_pid",
-        "name": "PID Controller",
-        "category": "controls",
-        "text": """Name: PID Controller
-Formula: u(t) = Kp e(t) + Ki ∫e(t)dt + Kd de(t)/dt
-Variables: u = controller output, e = error, Kp = proportional gain, Ki = integral gain, Kd = derivative gain
-Use: Calculate the conceptual PID control output.""",
-    },
-
-    # ========================================================
-    # ROBOTICS
-    # ========================================================
-
-    {
-        "id": "robot_arm_static_torque",
-        "name": "Static Robot Arm Torque",
-        "category": "robotics",
-        "text": """Name: Static Robot Arm Torque
-Formula: τ = mgr
-Variables: τ = required torque, m = supported mass, g = gravitational acceleration, r = perpendicular distance from joint
-Use: Estimate static joint torque for a robotic arm or linkage.""",
-    },
-
-    {
-        "id": "robot_arm_multiple_loads",
-        "name": "Multiple Robot Arm Loads",
-        "category": "robotics",
-        "text": """Name: Multiple Robot Arm Loads
-Formula: τ_total = Σ(m_i g r_i)
-Variables: τ_total = total static gravitational torque, m_i = each mass, g = gravitational acceleration, r_i = perpendicular distance from joint
-Use: Estimate static torque when multiple masses act about a joint.""",
-    },
-
-    {
-        "id": "robot_wheel_force",
-        "name": "Wheel Drive Force",
-        "category": "robotics",
-        "text": """Name: Wheel Drive Force
-Formula: F = τ/r
-Variables: F = tangential drive force, τ = wheel torque, r = wheel radius
-Units: N, N·m, m
-Use: Convert wheel torque into ideal ground drive force.""",
-    },
-
-    {
-        "id": "robot_wheel_speed",
-        "name": "Wheel Speed",
-        "category": "robotics",
-        "text": """Name: Wheel Linear Speed
-Formula: v = rω
-Variables: v = vehicle speed, r = wheel radius, ω = wheel angular velocity
-Use: Calculate ideal linear speed from wheel speed.""",
-    },
-]
-
-
-def initialize_formula_database():
-    """
-    Store the built-in formula library in ChromaDB.
-
-    upsert() makes this safe to run every time the application starts.
-    Existing formulas are updated instead of duplicated.
-    """
-
-    formulas.upsert(
-        documents=[
-            item["text"]
-            for item in FORMULA_LIBRARY
-        ],
-        ids=[
-            item["id"]
-            for item in FORMULA_LIBRARY
-        ],
-        metadatas=[
-            {
-                "name": item["name"],
-                "category": item["category"],
-                "type": "engineering_formula",
-            }
-            for item in FORMULA_LIBRARY
-        ],
-    )
-
-
-initialize_formula_database()
+# Maximum number of formulas retrieved for one question.
+MAX_FORMULAS = 4
 
 
 # ============================================================
@@ -746,13 +54,18 @@ initialize_formula_database()
 # ============================================================
 
 def chunk_it(text, size=1800):
+
     bits = text.split(". ")
     chunks, current = [], ""
 
     for bit in bits:
+
         if len(current) + len(bit) < size:
+
             current += bit + ". "
+
         else:
+
             if current.strip():
                 chunks.append(current.strip())
 
@@ -769,9 +82,15 @@ def chunk_it(text, size=1800):
 # ============================================================
 
 def store_document(file):
-    chunks = chunk_it(read_file(file))
 
-    prefix = file.name.replace(" ", "_")
+    chunks = chunk_it(
+        read_file(file)
+    )
+
+    prefix = file.name.replace(
+        " ",
+        "_",
+    )
 
     brain.upsert(
         documents=chunks,
@@ -785,7 +104,7 @@ def store_document(file):
                 "chunk": i,
             }
             for i in range(len(chunks))
-        ]
+        ],
     )
 
     return len(chunks)
@@ -796,14 +115,20 @@ def store_document(file):
 # ============================================================
 
 def store_messages(question, answer):
-    # Store a compact searchable representation rather than
-    # the entire potentially large assistant response.
-    compact_answer = answer[:MAX_STORED_ANSWER_CHARS].strip()
+
+    compact_answer = (
+        answer[:MAX_STORED_ANSWER_CHARS]
+        .strip()
+    )
 
     if len(answer) > MAX_STORED_ANSWER_CHARS:
+
         compact_answer += "..."
 
-    text = f"Q: {question}\nA: {compact_answer}"
+    text = (
+        f"Q: {question}\n"
+        f"A: {compact_answer}"
+    )
 
     chunks = chunk_it(text)
 
@@ -824,80 +149,10 @@ def store_messages(question, answer):
         ids=[
             f"turn{turn}_{i}"
             for i in range(len(chunks))
-        ]
+        ],
     )
 
     return len(chunks)
-
-
-# ============================================================
-# FORMULA RETRIEVAL
-# ============================================================
-
-def retrieve_formulas(prompt):
-    """
-    Retrieve only formulas relevant to the current question.
-
-    The complete formula library stays in ChromaDB and is NOT
-    placed in the system prompt.
-    """
-
-    if (
-        not prompt
-        or not prompt.strip()
-        or formulas.count() == 0
-    ):
-        return [], []
-
-    n_formulas = min(
-        MAX_FORMULA_CHUNKS,
-        formulas.count(),
-    )
-
-    hits = formulas.query(
-        query_texts=[prompt],
-        n_results=n_formulas,
-    )
-
-    formula_documents = hits.get(
-        "documents",
-        [[]],
-    )[0]
-
-    distances = hits.get(
-        "distances",
-        [[]],
-    )[0]
-
-    selected_formulas = []
-    formula_chars = 0
-
-    for formula in formula_documents:
-
-        if not formula:
-            continue
-
-        remaining_chars = (
-            MAX_FORMULA_CONTEXT_CHARS
-            - formula_chars
-        )
-
-        if remaining_chars <= 0:
-            break
-
-        selected_formula = formula[
-            :remaining_chars
-        ]
-
-        selected_formulas.append(
-            selected_formula
-        )
-
-        formula_chars += len(
-            selected_formula
-        )
-
-    return selected_formulas, distances[:len(selected_formulas)]
 
 
 # ============================================================
@@ -905,9 +160,6 @@ def retrieve_formulas(prompt):
 # ============================================================
 
 def get_rate_limit_type(error):
-    """
-    Determine what kind of Groq rate-limit error occurred.
-    """
 
     error_text = str(error).lower()
 
@@ -940,11 +192,6 @@ def get_rate_limit_type(error):
 
 
 def get_retry_seconds(error):
-    """
-    Try to extract a retry/wait duration from the API error.
-
-    Returns None if Groq did not provide one.
-    """
 
     error_text = str(error)
 
@@ -983,14 +230,14 @@ def get_retry_seconds(error):
 
 
 def handle_rate_limit_error(error):
-    """
-    Create a user-friendly rate-limit message and
-    establish a temporary cooldown.
-    """
 
-    limit_type = get_rate_limit_type(error)
+    limit_type = get_rate_limit_type(
+        error
+    )
 
-    retry_seconds = get_retry_seconds(error)
+    retry_seconds = get_retry_seconds(
+        error
+    )
 
     if retry_seconds is not None:
 
@@ -1024,9 +271,12 @@ def handle_rate_limit_error(error):
 
 
 if "rate_limit_until" not in st.session_state:
+
     st.session_state.rate_limit_until = 0
 
+
 if "rate_limit_type" not in st.session_state:
+
     st.session_state.rate_limit_type = None
 
 
@@ -1046,9 +296,12 @@ st.set_page_config(
 # ============================================================
 
 if "messages" not in st.session_state:
+
     st.session_state.messages = []
 
+
 if "engineering_memory" not in st.session_state:
+
     st.session_state.engineering_memory = ""
 
 
@@ -1057,17 +310,15 @@ if "engineering_memory" not in st.session_state:
 # ============================================================
 
 def clean_latex(text):
-    """
-    Clean LaTeX formatting while preserving valid LaTeX.
-    """
 
     if not text:
         return text
 
-    # Normalize escaped dollar signs.
-    text = text.replace(r"\$", "$")
+    text = text.replace(
+        r"\$",
+        "$",
+    )
 
-    # Convert \[ ... \] to $$ ... $$.
     text = re.sub(
         r"\\\[\s*(.*?)\s*\\\]",
         lambda match: (
@@ -1079,7 +330,6 @@ def clean_latex(text):
         flags=re.DOTALL,
     )
 
-    # Convert \( ... \) to $ ... $.
     text = re.sub(
         r"\\\(\s*(.*?)\s*\\\)",
         lambda match: (
@@ -1091,23 +341,20 @@ def clean_latex(text):
         flags=re.DOTALL,
     )
 
-    # Fix malformed LaTeX line spacing.
     text = re.sub(
-        r"\\\\+\s*\[\s*4pt\s*\]",
+        r"\\\\+\s*\\[\s*4pt\s*\\]",
         r"\\\\",
         text,
         flags=re.IGNORECASE,
     )
 
-    # Handle escaped/malformed variants.
     text = re.sub(
-        r"\\+\s*\[\s*4pt\s*\]",
+        r"\\+\s*\\[\s*4pt\s*\\]",
         r"\\\\",
         text,
         flags=re.IGNORECASE,
     )
 
-    # Remove excessive blank lines.
     text = re.sub(
         r"\n{4,}",
         "\n\n\n",
@@ -1118,6 +365,7 @@ def clean_latex(text):
 
 
 def render_markdown(text):
+
     if not text:
         return
 
@@ -1130,21 +378,14 @@ def render_markdown(text):
 # MEMORY CLEANING
 # ============================================================
 
-def clean_memory(memory_text):
-    """
-    Keep engineering memory compact.
+def clean_memory(memory):
 
-    Memory contains durable project facts, requirements,
-    decisions, calculated values, assumptions, constraints,
-    and unresolved engineering issues.
-    """
-
-    if not memory_text:
+    if not memory:
         return ""
 
-    memory_text = memory_text.strip()
+    memory = memory.strip()
 
-    memory_text = memory_text.replace(
+    memory = memory.replace(
         "<memory>",
         "",
     ).replace(
@@ -1152,28 +393,31 @@ def clean_memory(memory_text):
         "",
     )
 
-    memory_text = re.sub(
+    memory = re.sub(
         r"\n{3,}",
         "\n\n",
-        memory_text,
+        memory,
     )
 
-    if len(memory_text) > MAX_ENGINEERING_MEMORY_CHARS:
+    if len(memory) > MAX_ENGINEERING_MEMORY_CHARS:
 
-        memory_text = memory_text[
+        memory = memory[
             :MAX_ENGINEERING_MEMORY_CHARS
         ]
 
-        last_newline = memory_text.rfind("\n")
+        last_newline = memory.rfind(
+            "\n"
+        )
 
         if last_newline > 0:
-            memory_text = memory_text[
+
+            memory = memory[
                 :last_newline
             ]
 
-        memory_text = memory_text.rstrip()
+        memory = memory.rstrip()
 
-    return memory_text
+    return memory
 
 
 # ============================================================
@@ -1302,7 +546,9 @@ with st.sidebar:
 
     currency = st.selectbox(
         "Currency",
-        options=list(CURRENCIES.keys()),
+        options=list(
+            CURRENCIES.keys()
+        ),
         format_func=lambda code: (
             f"{CURRENCIES[code][0]}  "
             f"{code} — "
@@ -1314,7 +560,9 @@ with st.sidebar:
     # ENGINEERING PRIORITIES
     # ========================================================
 
-    st.subheader("Engineering Priorities")
+    st.subheader(
+        "Engineering Priorities"
+    )
 
     cost_priority = st.slider(
         "Cost",
@@ -1368,7 +616,9 @@ with st.sidebar:
     # MEMORY
     # ========================================================
 
-    st.subheader("Engineering Memory")
+    st.subheader(
+        "Engineering Memory"
+    )
 
     if st.button(
         "Clear engineering memory",
@@ -1419,16 +669,21 @@ with st.sidebar:
     # ========================================================
 
     st.caption(
-        f"{len(st.session_state.messages)} messages in this chat"
+        f"{len(st.session_state.messages)} "
+        f"messages in this chat"
     )
 
     # ========================================================
     # DOCUMENT DATABASE
     # ========================================================
 
-    if st.button("clear documents"):
+    if st.button(
+        "clear documents"
+    ):
 
-        db.delete_collection("documents")
+        db.delete_collection(
+            "documents"
+        )
 
         brain = db.get_or_create_collection(
             "documents"
@@ -1441,20 +696,16 @@ with st.sidebar:
     )
 
     # ========================================================
-    # FORMULA DATABASE
-    # ========================================================
-
-    st.caption(
-        f"{formulas.count()} engineering formulas available"
-    )
-
-    # ========================================================
     # CLEAR ALL PAST CHATS
     # ========================================================
 
-    if st.button("Clear all past chats"):
+    if st.button(
+        "Clear all past chats"
+    ):
 
-        db.delete_collection("converstations")
+        db.delete_collection(
+            "converstations"
+        )
 
         memory = db.get_or_create_collection(
             "converstations"
@@ -1498,12 +749,15 @@ starting torque, acceleration, thermal limits, safety margins,
 and other practical factors when relevant.
 
 FORMULAS:
-Relevant engineering formulas may be supplied as retrieved context.
-Use retrieved formulas when applicable.
-Do not assume a retrieved formula is relevant merely because it was retrieved.
-Check the variables, units, assumptions, and applicability before using a formula.
-If an appropriate retrieved formula exists, prefer it over inventing or guessing an equation.
-You may use standard engineering knowledge when the formula database does not contain the required equation.
+A separate formula library may provide relevant engineering
+equations for the current question.
+
+Use retrieved formulas when relevant.
+Do not assume a retrieved formula is applicable without checking
+its variables, assumptions, and units.
+
+You may also use standard engineering equations that are not
+present in the retrieved formula library when necessary.
 
 MATH:
 Use normal Markdown and Streamlit-compatible LaTeX.
@@ -1629,9 +883,11 @@ def build_messages():
     # RECENT CHAT
     # --------------------------------------------------------
 
-    recent_messages = st.session_state.messages[
-        -MAX_HISTORY_MESSAGES:
-    ]
+    recent_messages = (
+        st.session_state.messages[
+            -MAX_HISTORY_MESSAGES:
+        ]
+    )
 
     messages.extend(
         recent_messages
@@ -1647,6 +903,7 @@ def build_messages():
 def extract_response(raw_text):
 
     if not raw_text:
+
         return "", "", ""
 
     working_text = raw_text
@@ -1666,9 +923,13 @@ def extract_response(raw_text):
         working_text
     ):
 
-        reasoning = match.group(1).strip()
+        reasoning = (
+            match.group(1)
+            .strip()
+        )
 
         if reasoning:
+
             reasoning_parts.append(
                 reasoning
             )
@@ -1691,10 +952,12 @@ def extract_response(raw_text):
     if open_think_match:
 
         partial_reasoning = (
-            open_think_match.group(1).strip()
+            open_think_match.group(1)
+            .strip()
         )
 
         if partial_reasoning:
+
             reasoning_parts.append(
                 partial_reasoning
             )
@@ -1721,13 +984,19 @@ def extract_response(raw_text):
             memory_match.group(1)
         )
 
-        answer = working_text[
-            :memory_match.start()
-        ].rstrip()
+        answer = (
+            working_text[
+                :memory_match.start()
+            ]
+            .rstrip()
+        )
 
     else:
 
-        answer = working_text.rstrip()
+        answer = (
+            working_text
+            .rstrip()
+        )
 
         memory_text = ""
 
@@ -1754,9 +1023,12 @@ def extract_response(raw_text):
     # COMBINE REASONING
     # --------------------------------------------------------
 
-    inline_reasoning = "\n\n".join(
-        reasoning_parts
-    ).strip()
+    inline_reasoning = (
+        "\n\n".join(
+            reasoning_parts
+        )
+        .strip()
+    )
 
     return (
         answer,
@@ -1811,6 +1083,7 @@ rate_limited = remaining > 0
 if rate_limited:
 
     minutes = remaining // 60
+
     seconds = remaining % 60
 
     if minutes > 0:
@@ -1871,6 +1144,7 @@ if rate_limited:
 else:
 
     st.session_state.rate_limit_until = 0
+
     st.session_state.rate_limit_type = None
 
 
@@ -1939,12 +1213,47 @@ if user_input:
 
         render_markdown(prompt)
 
-
     # ========================================================
     # RAG / DOCUMENT + CHAT + FORMULA SEARCH
     # ========================================================
 
     notes = ""
+
+    # ========================================================
+    # FORMULA SEARCH
+    # ========================================================
+
+    if prompt.strip():
+
+        try:
+
+            formula_context = (
+                get_relevant_formulas(
+                    prompt,
+                    max_results=MAX_FORMULAS,
+                )
+            )
+
+        except TypeError:
+
+            # Allows compatibility if your formula library
+            # only accepts the query argument.
+            formula_context = (
+                get_relevant_formulas(
+                    prompt
+                )
+            )
+
+        except Exception:
+
+            formula_context = ""
+
+        if formula_context:
+
+            notes += (
+                "FORMULAS:\n"
+                + formula_context
+            )
 
     # ========================================================
     # DOCUMENT SEARCH
@@ -2016,9 +1325,14 @@ if user_input:
 
         if documents:
 
+            if notes:
+                notes += "\n\n"
+
             notes += (
                 "DOCUMENTS:\n"
-                + "\n\n".join(documents)
+                + "\n\n".join(
+                    documents
+                )
             )
 
             # ------------------------------------------------
@@ -2031,14 +1345,15 @@ if user_input:
 
                 for doc, dist in zip(
                     documents,
-                    distances[:len(documents)],
+                    distances[
+                        :len(documents)
+                    ],
                 ):
 
                     st.text(
                         f"{dist:.3f}, "
                         f"{doc[:70]}"
                     )
-
 
     # ========================================================
     # PAST CHAT SEARCH
@@ -2132,7 +1447,9 @@ if user_input:
 
                 for chat, dist in zip(
                     chat_documents,
-                    chat_distances[:len(chat_documents)],
+                    chat_distances[
+                        :len(chat_documents)
+                    ],
                 ):
 
                     st.text(
@@ -2140,51 +1457,22 @@ if user_input:
                         f"{chat[:70]}"
                     )
 
-
     # ========================================================
-    # FORMULA SEARCH
+    # SHOW RETRIEVED FORMULAS
     # ========================================================
 
-    retrieved_formulas, formula_distances = (
-        retrieve_formulas(prompt)
-    )
-
-    if retrieved_formulas:
-
-        if notes:
-            notes += "\n\n"
-
-        notes += (
-            "ENGINEERING FORMULAS:\n"
-            + "\n\n".join(
-                retrieved_formulas
-            )
-        )
-
-        # ----------------------------------------------------
-        # SHOW WHAT WAS RETRIEVED
-        # ----------------------------------------------------
+    if formula_context:
 
         with st.expander(
-            "What formulas I looked up"
+            "Formulas used",
+            expanded=False,
         ):
 
-            for formula, dist in zip(
-                retrieved_formulas,
-                formula_distances,
-            ):
-
-                first_line = (
-                    formula.splitlines()[0]
-                    if formula
-                    else ""
+            st.markdown(
+                clean_latex(
+                    formula_context
                 )
-
-                st.text(
-                    f"{dist:.3f}, "
-                    f"{first_line}"
-                )
-
+            )
 
     # ========================================================
     # BUILD OPTIMIZED CONTEXT
@@ -2194,19 +1482,17 @@ if user_input:
 
     if notes:
 
-        # The current question is already present in
-        # request_messages, so do not send it a second time.
         notes_prompt = (
-            "Relevant retrieved context. "
-            "Use only information relevant to the current question "
-            "and ignore irrelevant or conflicting retrieved content.\n\n"
+            "Relevant retrieved context.\n"
+            "Use only information relevant to the current "
+            "question and ignore irrelevant or conflicting "
+            "retrieved content.\n\n"
             + notes
         )
 
     else:
 
         notes_prompt = ""
-
 
     # ========================================================
     # ASSISTANT
@@ -2234,7 +1520,7 @@ if user_input:
                 )
 
                 # --------------------------------------------
-                # ADD RAG CONTEXT
+                # ADD RAG + FORMULA CONTEXT
                 # --------------------------------------------
 
                 if notes_prompt:
@@ -2250,13 +1536,15 @@ if user_input:
                 # API REQUEST
                 # --------------------------------------------
 
-                stream = client.chat.completions.create(
-                    model=model,
-                    messages=stream_messages,
-                    temperature=creativity,
-                    reasoning_effort=reasoning_effort,
-                    max_completion_tokens=MAX_COMPLETION_TOKENS,
-                    stream=True,
+                stream = (
+                    client.chat.completions.create(
+                        model=model,
+                        messages=stream_messages,
+                        temperature=creativity,
+                        reasoning_effort=reasoning_effort,
+                        max_completion_tokens=MAX_COMPLETION_TOKENS,
+                        stream=True,
+                    )
                 )
 
             except Exception as e:
@@ -2271,7 +1559,9 @@ if user_input:
                 ):
 
                     cooldown = (
-                        handle_rate_limit_error(e)
+                        handle_rate_limit_error(
+                            e
+                        )
                     )
 
                     limit_type = (
@@ -2329,7 +1619,6 @@ if user_input:
 
                 st.stop()
 
-
             # =================================================
             # ENGINEERING PROCESS
             # =================================================
@@ -2339,8 +1628,9 @@ if user_input:
                 expanded=True,
             ):
 
-                thinking_placeholder = st.empty()
-
+                thinking_placeholder = (
+                    st.empty()
+                )
 
             # =================================================
             # ANSWER
@@ -2353,7 +1643,6 @@ if user_input:
             inline_reasoning_text = ""
 
             raw_answer_text = ""
-
 
             # =================================================
             # STREAM
@@ -2380,7 +1669,9 @@ if user_input:
 
                 if reasoning:
 
-                    reasoning_text += reasoning
+                    reasoning_text += (
+                        reasoning
+                    )
 
                 # =============================================
                 # FINAL RESPONSE
@@ -2394,7 +1685,9 @@ if user_input:
 
                 if content:
 
-                    raw_answer_text += content
+                    raw_answer_text += (
+                        content
+                    )
 
                 # =============================================
                 # PARSE CONTENT
@@ -2450,7 +1743,6 @@ if user_input:
                     )
                 )
 
-
             # =================================================
             # FINAL EXTRACTION
             # =================================================
@@ -2463,7 +1755,6 @@ if user_input:
                 raw_answer_text
             )
 
-
             # =================================================
             # UPDATE MEMORY
             # =================================================
@@ -2473,7 +1764,6 @@ if user_input:
                 st.session_state.engineering_memory = (
                     new_memory
                 )
-
 
             # =================================================
             # REASONING FALLBACK
@@ -2509,7 +1799,6 @@ if user_input:
                     "*No separate reasoning was returned by the model.*"
                 )
 
-
             # =================================================
             # SAVE FINAL ANSWER
             # =================================================
@@ -2525,7 +1814,6 @@ if user_input:
                 prompt,
                 answer_text,
             )
-
 
         # ====================================================
         # NON-STREAMING
@@ -2548,7 +1836,7 @@ if user_input:
                     )
 
                     # ----------------------------------------
-                    # ADD RAG CONTEXT
+                    # ADD RAG + FORMULA CONTEXT
                     # ----------------------------------------
 
                     if notes_prompt:
@@ -2564,12 +1852,14 @@ if user_input:
                     # API REQUEST
                     # ----------------------------------------
 
-                    response = client.chat.completions.create(
-                        model=model,
-                        messages=response_messages,
-                        temperature=creativity,
-                        reasoning_effort=reasoning_effort,
-                        max_completion_tokens=MAX_COMPLETION_TOKENS,
+                    response = (
+                        client.chat.completions.create(
+                            model=model,
+                            messages=response_messages,
+                            temperature=creativity,
+                            reasoning_effort=reasoning_effort,
+                            max_completion_tokens=MAX_COMPLETION_TOKENS,
+                        )
                     )
 
                 except Exception as e:
@@ -2584,7 +1874,9 @@ if user_input:
                     ):
 
                         cooldown = (
-                            handle_rate_limit_error(e)
+                            handle_rate_limit_error(
+                                e
+                            )
                         )
 
                         limit_type = (
@@ -2642,7 +1934,6 @@ if user_input:
 
                     st.stop()
 
-
             # =================================================
             # RAW RESPONSE
             # =================================================
@@ -2654,7 +1945,6 @@ if user_input:
                 .content
                 or ""
             )
-
 
             # =================================================
             # EXTRACT ANSWER + REASONING + MEMORY
@@ -2668,7 +1958,6 @@ if user_input:
                 raw_response
             )
 
-
             # =================================================
             # UPDATE MEMORY
             # =================================================
@@ -2679,7 +1968,6 @@ if user_input:
                     new_memory
                 )
 
-
             # =================================================
             # GET NATIVE API REASONING
             # =================================================
@@ -2689,7 +1977,6 @@ if user_input:
                 "reasoning",
                 None,
             )
-
 
             # =================================================
             # ENGINEERING PROCESS
@@ -2728,7 +2015,6 @@ if user_input:
                         "*No reasoning was returned.*"
                     )
 
-
             # =================================================
             # DISPLAY ANSWER
             # =================================================
@@ -2736,7 +2022,6 @@ if user_input:
             render_markdown(
                 answer_text
             )
-
 
             # =================================================
             # SAVE ANSWER
