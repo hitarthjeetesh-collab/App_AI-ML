@@ -799,6 +799,7 @@ Style={style}
 Detail={explanation_level}
 Creativity={creativity}
 Units={units}
+Currency={currency}
 
 PRIORITIES:
 Cost={cost_priority}
