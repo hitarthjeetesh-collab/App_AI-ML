@@ -992,7 +992,12 @@ st.title(
 
 for message in st.session_state.messages:
     with st.chat_message(
-            message["role"]
+            message["role"],
+            avatar=(
+                "assets/Firefly.png"
+                if message["role"] == "assistant"
+                else "👤"
+            ),
     ):
         render_markdown(
             message["content"]
@@ -1135,7 +1140,10 @@ if user_input:
     # DISPLAY USER MESSAGE 
     # -------------------------------------------------------- 
 
-    with st.chat_message("user"):
+    with st.chat_message(
+            "user",
+            avatar="👤",
+    ):
 
         render_markdown(prompt)
 
@@ -1232,7 +1240,10 @@ if user_input:
     # ASSISTANT 
     # ======================================================== 
 
-    with st.chat_message("assistant"):
+    with st.chat_message(
+            "assistant",
+            avatar="assets/Firefly.png",
+    ):
 
         # ==================================================== 
         # STREAMING 
