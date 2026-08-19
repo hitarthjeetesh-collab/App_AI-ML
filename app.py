@@ -46,11 +46,10 @@ MAX_CHAT_CONTEXT_CHARS = 4500
 
 MAX_STORED_ANSWER_CHARS = 1200
 
-# Maximum number of formulas retrieved for one question.
 MAX_FORMULAS = 4
 
-# Maximum number of engineering constants retrieved for one question.
 MAX_CONSTANTS = 4
+
 
 # ============================================================
 # CHUNKING
@@ -306,6 +305,40 @@ if "messages" not in st.session_state:
 if "engineering_memory" not in st.session_state:
 
     st.session_state.engineering_memory = ""
+
+
+# ============================================================
+# PERSISTENT UI STATE
+# ============================================================
+
+if "expanded_memory" not in st.session_state:
+
+    st.session_state.expanded_memory = False
+
+
+if "expanded_documents" not in st.session_state:
+
+    st.session_state.expanded_documents = False
+
+
+if "expanded_past_chats" not in st.session_state:
+
+    st.session_state.expanded_past_chats = False
+
+
+if "expanded_formulas" not in st.session_state:
+
+    st.session_state.expanded_formulas = False
+
+
+if "expanded_constants" not in st.session_state:
+
+    st.session_state.expanded_constants = False
+
+
+if "expanded_engineering_process" not in st.session_state:
+
+    st.session_state.expanded_engineering_process = False
 
 
 # ============================================================
@@ -630,6 +663,8 @@ with st.sidebar:
 
         st.session_state.engineering_memory = ""
 
+        st.session_state.expanded_memory = False
+
         st.rerun()
 
     if st.session_state.engineering_memory:
@@ -639,10 +674,17 @@ with st.sidebar:
             f"/ {MAX_ENGINEERING_MEMORY_CHARS} characters"
         )
 
-        with st.expander(
+        memory_expanded = st.checkbox(
             "View memory",
-            expanded=False,
-        ):
+            value=st.session_state.expanded_memory,
+            key="memory_expander_control",
+        )
+
+        st.session_state.expanded_memory = (
+            memory_expanded
+        )
+
+        if memory_expanded:
 
             st.markdown(
                 st.session_state.engineering_memory
@@ -1265,16 +1307,19 @@ if user_input:
         if formula_context:
 
             if isinstance(formula_context, list):
+
                 formula_context = "\n\n".join(
                     str(item)
                     for item in formula_context
                 )
 
-            formula_context = str(formula_context)
+            formula_context = str(
+                formula_context
+            )
 
             notes += (
-                    "FORMULAS:\n"
-                    + formula_context
+                "FORMULAS:\n"
+                + formula_context
             )
 
     # ========================================================
@@ -1300,21 +1345,29 @@ if user_input:
 
         if constant_context:
 
-            if isinstance(constant_context, list):
+            if isinstance(
+                constant_context,
+                list
+            ):
+
                 constant_context = "\n\n".join(
                     str(item)
                     for item in constant_context
                 )
 
-            constant_context = str(constant_context)
+            constant_context = str(
+                constant_context
+            )
 
             if notes:
+
                 notes += "\n\n"
 
             notes += (
-                    "ENGINEERING CONSTANTS:\n"
-                    + constant_context
+                "ENGINEERING CONSTANTS:\n"
+                + constant_context
             )
+
     # ========================================================
     # DOCUMENT SEARCH
     # ========================================================
@@ -1399,9 +1452,17 @@ if user_input:
             # SHOW WHAT WAS RETRIEVED
             # ------------------------------------------------
 
-            with st.expander(
-                "What I looked up"
-            ):
+            documents_expanded = st.checkbox(
+                "What I looked up",
+                value=st.session_state.expanded_documents,
+                key="documents_expander_control",
+            )
+
+            st.session_state.expanded_documents = (
+                documents_expanded
+            )
+
+            if documents_expanded:
 
                 for doc, dist in zip(
                     documents,
@@ -1501,9 +1562,17 @@ if user_input:
             # SHOW WHAT WAS RETRIEVED
             # ------------------------------------------------
 
-            with st.expander(
-                "What I looked up from past chats"
-            ):
+            past_chats_expanded = st.checkbox(
+                "What I looked up from past chats",
+                value=st.session_state.expanded_past_chats,
+                key="past_chats_expander_control",
+            )
+
+            st.session_state.expanded_past_chats = (
+                past_chats_expanded
+            )
+
+            if past_chats_expanded:
 
                 for chat, dist in zip(
                     chat_documents,
@@ -1523,30 +1592,48 @@ if user_input:
 
     if formula_context:
 
-        with st.expander(
+        formulas_expanded = st.checkbox(
             "Formulas used",
-            expanded=False,
-        ):
+            value=st.session_state.expanded_formulas,
+            key="formulas_expander_control",
+        )
+
+        st.session_state.expanded_formulas = (
+            formulas_expanded
+        )
+
+        if formulas_expanded:
 
             st.markdown(
                 clean_latex(
                     formula_context
                 )
             )
+
     # ========================================================
     # SHOW RETRIEVED ENGINEERING CONSTANTS
     # ========================================================
 
     if constant_context:
-        with st.expander(
-                "Engineering constants used",
-                expanded=False,
-        ):
+
+        constants_expanded = st.checkbox(
+            "Engineering constants used",
+            value=st.session_state.expanded_constants,
+            key="constants_expander_control",
+        )
+
+        st.session_state.expanded_constants = (
+            constants_expanded
+        )
+
+        if constants_expanded:
+
             st.markdown(
                 clean_latex(
                     constant_context
                 )
             )
+
     # ========================================================
     # BUILD OPTIMIZED CONTEXT
     # ========================================================
@@ -1696,14 +1783,17 @@ if user_input:
             # ENGINEERING PROCESS
             # =================================================
 
-            with st.expander(
+            engineering_process_expanded = st.checkbox(
                 "Engineering Process",
-                expanded=True,
-            ):
+                value=st.session_state.expanded_engineering_process,
+                key="engineering_process_expander_stream_control",
+            )
 
-                thinking_placeholder = (
-                    st.empty()
-                )
+            st.session_state.expanded_engineering_process = (
+                engineering_process_expanded
+            )
+
+            thinking_placeholder = st.empty()
 
             # =================================================
             # ANSWER
@@ -1796,7 +1886,10 @@ if user_input:
                         inline_reasoning_text.strip()
                     )
 
-                if combined_reasoning_parts:
+                if (
+                    engineering_process_expanded
+                    and combined_reasoning_parts
+                ):
 
                     thinking_placeholder.markdown(
                         clean_latex(
@@ -1856,21 +1949,23 @@ if user_input:
                     inline_reasoning_text.strip()
                 )
 
-            if combined_reasoning_parts:
+            if engineering_process_expanded:
 
-                thinking_placeholder.markdown(
-                    clean_latex(
-                        "\n\n".join(
-                            combined_reasoning_parts
+                if combined_reasoning_parts:
+
+                    thinking_placeholder.markdown(
+                        clean_latex(
+                            "\n\n".join(
+                                combined_reasoning_parts
+                            )
                         )
                     )
-                )
 
-            else:
+                else:
 
-                thinking_placeholder.markdown(
-                    "*No separate reasoning was returned by the model.*"
-                )
+                    thinking_placeholder.markdown(
+                        "*No separate reasoning was returned by the model.*"
+                    )
 
             # =================================================
             # SAVE FINAL ANSWER
@@ -2055,10 +2150,17 @@ if user_input:
             # ENGINEERING PROCESS
             # =================================================
 
-            with st.expander(
+            engineering_process_expanded = st.checkbox(
                 "Engineering Process",
-                expanded=False,
-            ):
+                value=st.session_state.expanded_engineering_process,
+                key="engineering_process_expander_nonstream_control",
+            )
+
+            st.session_state.expanded_engineering_process = (
+                engineering_process_expanded
+            )
+
+            if engineering_process_expanded:
 
                 combined_reasoning_parts = []
 
