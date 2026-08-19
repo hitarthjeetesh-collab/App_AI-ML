@@ -548,19 +548,6 @@ with st.sidebar:
         ),
     )
 
-    TEMPREATURE = {
-        "°C": ("", "Celsius"),
-        "°F": ("", "Fahrenheit"),
-    }
-
-    temperature = st.selectbox(
-        "Temperature",
-        options=list(TEMPREATURE.keys()),
-        format_func=lambda code: (
-            f"{TEMPREATURE[code][0]}  {code} — {TEMPREATURE[code][1]}"
-        )
-    )
-
     # ========================================================
     # ENGINEERING PRIORITIES
     # ========================================================
@@ -813,7 +800,6 @@ Detail={explanation_level}
 Creativity={creativity}
 Units={units}
 Currency={currency}
-Temperature units={temperature}
 
 PRIORITIES:
 Cost={cost_priority}
