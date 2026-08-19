@@ -221,26 +221,7 @@ st.set_page_config(
     page_icon="assets/Firefly.png",
     layout="wide",
 )
-st.markdown("""
-<style>
 
-section[data-testid="stSidebar"] {
-    background: rgba(20, 28, 36, 0.55) !important;
-    backdrop-filter: blur(24px) saturate(140%);
-    -webkit-backdrop-filter: blur(24px) saturate(140%);
-    border-right: 1px solid rgba(255, 255, 255, 0.10);
-}
-
-section[data-testid="stSidebar"] > div {
-    background: transparent !important;
-}
-
-section[data-testid="stSidebar"] [data-testid="stSidebarContent"] {
-    background: transparent !important;
-}
-
-</style>
-""", unsafe_allow_html=True)
 # ============================================================
 # SESSION STATE 
 # ============================================================ 
