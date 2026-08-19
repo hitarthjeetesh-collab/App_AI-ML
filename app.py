@@ -1249,26 +1249,29 @@ if user_input:
 
         try:
 
-            formula_context = (
-                get_relevant_formulas(
-                    prompt,
-                    max_results=MAX_FORMULAS,
-                )
+            formula_context = get_relevant_formulas(
+                prompt,
+                max_results=MAX_FORMULAS,
             )
 
         except TypeError:
 
-            formula_context = (
-                get_relevant_formulas(
-                    prompt
-                )
-            )
+            formula_context = get_relevant_formulas(prompt)
 
         except Exception:
 
             formula_context = ""
 
         if formula_context:
+
+            if isinstance(formula_context, list):
+                formula_context = "\n\n".join(
+                    str(item)
+                    for item in formula_context
+                )
+
+            formula_context = str(formula_context)
+
             notes += (
                     "FORMULAS:\n"
                     + formula_context
@@ -1282,28 +1285,28 @@ if user_input:
 
         try:
 
-            constant_context = (
-                get_relevant_constants(
-                    prompt,
-                    max_results=MAX_CONSTANTS,
-                )
+            constant_context = get_relevant_constants(
+                prompt,
+                max_results=MAX_CONSTANTS,
             )
 
         except TypeError:
 
-            # Compatibility with a constants library that
-            # only accepts the query argument.
-            constant_context = (
-                get_relevant_constants(
-                    prompt
-                )
-            )
+            constant_context = get_relevant_constants(prompt)
 
         except Exception:
 
             constant_context = ""
 
         if constant_context:
+
+            if isinstance(constant_context, list):
+                constant_context = "\n\n".join(
+                    str(item)
+                    for item in constant_context
+                )
+
+            constant_context = str(constant_context)
 
             if notes:
                 notes += "\n\n"
