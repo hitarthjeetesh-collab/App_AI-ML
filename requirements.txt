@@ -1,5 +1,5 @@
-streamlit
-openai
-python-dotenv
-pypdf
+streamlit==1.61.1
+openai==3.3.0
+python-dotenv==1.2.3
+pypdf==6.16.1
 chromadb==1.5.5
