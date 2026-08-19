@@ -30,7 +30,7 @@ memory = db.get_or_create_collection("converstations")
 # TOKEN OPTIMIZATION
 # ============================================================
 
-MAX_COMPLETION_TOKENS = 3500
+MAX_COMPLETION_TOKENS = 4000
 
 MAX_HISTORY_MESSAGES = 6
 
