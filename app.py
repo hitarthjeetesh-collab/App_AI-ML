@@ -238,7 +238,7 @@ if "engineering_memory" not in st.session_state:
 # ============================================================ 
 
 def clean_latex(text):
-    """ 
+    r"""
     Clean LaTeX formatting while preserving valid LaTeX. 
 
     The model may return: 
