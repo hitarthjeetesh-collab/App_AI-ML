@@ -28,7 +28,7 @@ memory = db.get_or_create_collection("converstations")
 # ============================================================
 
 # Maximum generated tokens.
-MAX_COMPLETION_TOKENS = 2000
+MAX_COMPLETION_TOKENS = 3000
 
 # Number of recent chat messages sent to the model.
 MAX_HISTORY_MESSAGES = 6
