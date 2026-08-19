@@ -6,6 +6,7 @@ from openai import OpenAI
 import chromadb
 from doc_helper import read_file
 from formula_library import get_relevant_formulas
+from engineering_constants import get_relevant_constants
 import time
 
 
@@ -48,6 +49,8 @@ MAX_STORED_ANSWER_CHARS = 1200
 # Maximum number of formulas retrieved for one question.
 MAX_FORMULAS = 4
 
+# Maximum number of engineering constants retrieved for one question.
+MAX_CONSTANTS = 4
 
 # ============================================================
 # CHUNKING
@@ -759,6 +762,22 @@ its variables, assumptions, and units.
 You may also use standard engineering equations that are not
 present in the retrieved formula library when necessary.
 
+ENGINEERING CONSTANTS:
+A separate engineering-constants library may provide relevant
+physical constants, material properties, standard values, and
+engineering reference values.
+
+Use retrieved constants when relevant.
+Check that the constant applies to the material, environment,
+units, and conditions being considered.
+
+Do not blindly use a retrieved constant if the user's specific
+material or conditions require a different value.
+
+If a specific user-provided value conflicts with a retrieved
+constant, use the user's explicit value and identify the
+difference when relevant.
+
 MATH:
 Use normal Markdown and Streamlit-compatible LaTeX.
 
@@ -1214,10 +1233,13 @@ if user_input:
         render_markdown(prompt)
 
     # ========================================================
-    # RAG / DOCUMENT + CHAT + FORMULA SEARCH
+    # RAG / DOCUMENT + CHAT + FORMULA + CONSTANT SEARCH
     # ========================================================
 
     notes = ""
+
+    formula_context = ""
+    constant_context = ""
 
     # ========================================================
     # FORMULA SEARCH
@@ -1236,8 +1258,6 @@ if user_input:
 
         except TypeError:
 
-            # Allows compatibility if your formula library
-            # only accepts the query argument.
             formula_context = (
                 get_relevant_formulas(
                     prompt
@@ -1249,12 +1269,49 @@ if user_input:
             formula_context = ""
 
         if formula_context:
-
             notes += (
-                "FORMULAS:\n"
-                + formula_context
+                    "FORMULAS:\n"
+                    + formula_context
             )
 
+    # ========================================================
+    # ENGINEERING CONSTANT SEARCH
+    # ========================================================
+
+    if prompt.strip():
+
+        try:
+
+            constant_context = (
+                get_relevant_constants(
+                    prompt,
+                    max_results=MAX_CONSTANTS,
+                )
+            )
+
+        except TypeError:
+
+            # Compatibility with a constants library that
+            # only accepts the query argument.
+            constant_context = (
+                get_relevant_constants(
+                    prompt
+                )
+            )
+
+        except Exception:
+
+            constant_context = ""
+
+        if constant_context:
+
+            if notes:
+                notes += "\n\n"
+
+            notes += (
+                    "ENGINEERING CONSTANTS:\n"
+                    + constant_context
+            )
     # ========================================================
     # DOCUMENT SEARCH
     # ========================================================
@@ -1473,7 +1530,20 @@ if user_input:
                     formula_context
                 )
             )
+    # ========================================================
+    # SHOW RETRIEVED ENGINEERING CONSTANTS
+    # ========================================================
 
+    if constant_context:
+        with st.expander(
+                "Engineering constants used",
+                expanded=False,
+        ):
+            st.markdown(
+                clean_latex(
+                    constant_context
+                )
+            )
     # ========================================================
     # BUILD OPTIMIZED CONTEXT
     # ========================================================
