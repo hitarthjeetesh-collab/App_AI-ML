@@ -20,7 +20,7 @@ api_key=os.getenv("GROQ_API_KEY"),
 
 db = chromadb.PersistentClient(path="./chromadb")
 brain = db.get_or_create_collection("documents")
-
+memory = db.get_or_create_collections("converstations")
 
 def chunk_it(text, size=3000):
     bits = text.split(". ")
@@ -63,6 +63,16 @@ def store_document(file):
 
     return len(chunks)
 
+def store_messages(question, answer):
+    text = f"Q:{question}, A:{answer}"
+    chunks = chunk_it(text)
+    turn = memory.count()
+    memory.upsert(
+        documents=[f"[past chat] {c}" for c in chunks],
+        metadatas=[{"kind":"chat", "turn": turn} for c in chunks],
+        ids=[f"turn{turn}_{i}" for i in range(len(chunks))]
+    )
+    return len(chunks)
 
 # ============================================================ 
 # TOKEN OPTIMIZATION 
@@ -638,6 +648,16 @@ with st.sidebar:
 
     st.caption(
         f"{brain.count()} chunks inside the chat"
+    )
+    # ============================================================
+    # Clear all past chats
+    # ============================================================
+
+    if st.button("Clear all past chats"):
+        db.delete_collection("converstations")
+        st.rerun()
+    st.caption(
+        f"{memory.count()} past chats stored in the database"
     )
 
 # ============================================================
@@ -1217,7 +1237,7 @@ if user_input:
 
         notes_prompt = ""
 
-        # ========================================================
+    # ========================================================
     # ASSISTANT 
     # ======================================================== 
 
@@ -1513,6 +1533,7 @@ if user_input:
                     "content": answer_text,
                 }
             )
+            store_messages(prompt, answer_text)
 
             # ====================================================
         # NON-STREAMING 
@@ -1724,3 +1745,4 @@ if user_input:
                     "content": answer_text,
                 }
             )
+            store_messages(prompt, answer_text)
