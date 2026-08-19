@@ -429,6 +429,37 @@ def clean_memory(memory):
 
 with st.sidebar:
 
+    # ========================================================
+    # DESTRUCTIVE BUTTON STYLING
+    # ========================================================
+
+    st.markdown(
+        """
+        <style>
+        /* Red destructive buttons */
+        button[kind="secondary"]:has(p) {
+            transition: background-color 0.15s ease,
+                       border-color 0.15s ease,
+                       color 0.15s ease;
+        }
+
+        /* Clear engineering memory */
+        div[data-testid="stButton"]:has(
+            button p:first-child
+        ) button {
+            /* Styling is applied below through the
+               individual button containers */
+        }
+
+        /* Target buttons by their displayed text */
+        div[data-testid="stButton"] button:has(p) {
+            /* Keep normal buttons unchanged */
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     st.subheader("Settings")
 
     # --------------------------------------------------------
@@ -718,6 +749,42 @@ with st.sidebar:
 
     st.caption(
         f"{memory.count()} past chats stored in the database"
+    )
+
+    # ========================================================
+    # APPLY RED STYLE TO ONLY THE FOUR DESTRUCTIVE BUTTONS
+    # ========================================================
+
+    st.markdown(
+        """
+        <script>
+        const destructiveButtons = [
+            "Clear engineering memory",
+            "Clear chat",
+            "clear documents",
+            "Clear all past chats"
+        ];
+
+        function styleDestructiveButtons() {
+            const buttons = document.querySelectorAll(
+                'div[data-testid="stButton"] button'
+            );
+
+            buttons.forEach(button => {
+                const text = button.innerText.trim();
+
+                if (destructiveButtons.includes(text)) {
+                    button.style.backgroundColor = "#d32f2f";
+                    button.style.color = "white";
+                    button.style.borderColor = "#d32f2f";
+                }
+            });
+        }
+
+        styleDestructiveButtons();
+        </script>
+        """,
+        unsafe_allow_html=True,
     )
 
 
