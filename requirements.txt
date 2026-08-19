@@ -2,4 +2,4 @@ streamlit
 openai
 python-dotenv
 pypdf
-chromadb
+chromadb==1.5.5
