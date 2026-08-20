@@ -1,3 +1,4 @@
+#I need to lock them due to a compatiability issue I was getting and I didn't feel like spending time debugging it, as it was working fine with these versions.
 streamlit==1.61.1
 openai==3.3.0
 python-dotenv==1.2.3

@@ -25,6 +25,29 @@ db = chromadb.PersistentClient(path="./chromadb")
 brain = db.get_or_create_collection("documents")
 memory = db.get_or_create_collection("conversations")
 
+st.markdown("""
+<style>
+    .stApp {
+        background:
+            radial-gradient(
+                circle at 15% 5%,
+                rgba(0, 184, 217, 0.10),
+                transparent 28%
+            ),
+            radial-gradient(
+                circle at 85% 15%,
+                rgba(139, 92, 246, 0.08),
+                transparent 30%
+            ),
+            radial-gradient(
+                circle at 50% 100%,
+                rgba(76, 141, 255, 0.05),
+                transparent 35%
+            ),
+            #080C11;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # ============================================================
 # TOKEN OPTIMIZATION
