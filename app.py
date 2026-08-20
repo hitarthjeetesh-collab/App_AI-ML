@@ -54,6 +54,7 @@ MAX_FORMULAS = 4
 # Maximum number of engineering constants retrieved for one question.
 MAX_CONSTANTS = 4
 
+
 # ============================================================
 # CHUNKING
 # ============================================================
@@ -755,11 +756,11 @@ with st.sidebar:
         ):
 
             db.delete_collection(
-                "converstations"
+                "conversations"
             )
 
             memory = db.get_or_create_collection(
-                "converstations"
+                "conversations"
             )
 
             st.rerun()
@@ -1128,9 +1129,161 @@ for message in st.session_state.messages:
         ),
     ):
 
-        render_markdown(
-            message["content"]
-        )
+        # ----------------------------------------------------
+        # USER MESSAGE
+        # ----------------------------------------------------
+
+        if message["role"] == "user":
+
+            render_markdown(
+                message["content"]
+            )
+
+        # ----------------------------------------------------
+        # ASSISTANT MESSAGE
+        # ----------------------------------------------------
+
+        else:
+
+            # =================================================
+            # ENGINEERING PROCESS
+            # =================================================
+
+            reasoning = message.get(
+                "reasoning",
+                "",
+            )
+
+            with st.expander(
+                "Engineering Process",
+                expanded=False,
+            ):
+
+                if reasoning:
+
+                    render_markdown(
+                        reasoning
+                    )
+
+                else:
+
+                    st.markdown(
+                        "*No separate reasoning was returned by the model.*"
+                    )
+
+            # =================================================
+            # WHAT I LOOKED UP
+            # =================================================
+
+            documents = message.get(
+                "documents",
+                [],
+            )
+
+            document_distances = message.get(
+                "document_distances",
+                [],
+            )
+
+            if documents:
+
+                with st.expander(
+                    "What I looked up",
+                    expanded=False,
+                ):
+
+                    for doc, dist in zip(
+                        documents,
+                        document_distances,
+                    ):
+
+                        st.text(
+                            f"{dist:.3f}, "
+                            f"{doc[:70]}"
+                        )
+
+            # =================================================
+            # PAST CHAT SEARCH
+            # =================================================
+
+            chat_documents = message.get(
+                "chat_documents",
+                [],
+            )
+
+            chat_distances = message.get(
+                "chat_distances",
+                [],
+            )
+
+            if chat_documents:
+
+                with st.expander(
+                    "What I looked up from past chats",
+                    expanded=False,
+                ):
+
+                    for chat, dist in zip(
+                        chat_documents,
+                        chat_distances,
+                    ):
+
+                        st.text(
+                            f"{dist:.3f}, "
+                            f"{chat[:70]}"
+                        )
+
+            # =================================================
+            # FORMULAS
+            # =================================================
+
+            formulas = message.get(
+                "formulas",
+                "",
+            )
+
+            if formulas:
+
+                with st.expander(
+                    "Formulas used",
+                    expanded=False,
+                ):
+
+                    st.markdown(
+                        clean_latex(
+                            formulas
+                        )
+                    )
+
+            # =================================================
+            # ENGINEERING CONSTANTS
+            # =================================================
+
+            constants = message.get(
+                "constants",
+                "",
+            )
+
+            if constants:
+
+                with st.expander(
+                    "Engineering constants used",
+                    expanded=False,
+                ):
+
+                    st.markdown(
+                        clean_latex(
+                            constants
+                        )
+                    )
+
+            # =================================================
+            # FINAL ANSWER
+            # =================================================
+
+            render_markdown(
+                message["content"]
+            )
 
 
 # ============================================================
@@ -1321,8 +1474,8 @@ if user_input:
             formula_context = str(formula_context)
 
             notes += (
-                    "FORMULAS:\n"
-                    + formula_context
+                "FORMULAS:\n"
+                + formula_context
             )
 
     # ========================================================
@@ -1360,9 +1513,10 @@ if user_input:
                 notes += "\n\n"
 
             notes += (
-                    "ENGINEERING CONSTANTS:\n"
-                    + constant_context
+                "ENGINEERING CONSTANTS:\n"
+                + constant_context
             )
+
     # ========================================================
     # DOCUMENT SEARCH
     # ========================================================
@@ -1581,20 +1735,24 @@ if user_input:
                     formula_context
                 )
             )
+
     # ========================================================
     # SHOW RETRIEVED ENGINEERING CONSTANTS
     # ========================================================
 
     if constant_context:
+
         with st.expander(
-                "Engineering constants used",
-                expanded=False,
+            "Engineering constants used",
+            expanded=False,
         ):
+
             st.markdown(
                 clean_latex(
                     constant_context
                 )
             )
+
     # ========================================================
     # BUILD OPTIMIZED CONTEXT
     # ========================================================
@@ -1924,10 +2082,58 @@ if user_input:
             # SAVE FINAL ANSWER
             # =================================================
 
+            final_reasoning_parts = []
+
+            if reasoning_text.strip():
+
+                final_reasoning_parts.append(
+                    reasoning_text.strip()
+                )
+
+            if inline_reasoning_text.strip():
+
+                final_reasoning_parts.append(
+                    inline_reasoning_text.strip()
+                )
+
+            final_reasoning = "\n\n".join(
+                final_reasoning_parts
+            ).strip()
+
             st.session_state.messages.append(
                 {
                     "role": "assistant",
                     "content": answer_text,
+
+                    "reasoning": final_reasoning,
+
+                    "formulas": formula_context,
+
+                    "constants": constant_context,
+
+                    "documents": (
+                        documents
+                        if documents
+                        else []
+                    ),
+
+                    "document_distances": (
+                        distances[:len(documents)]
+                        if documents
+                        else []
+                    ),
+
+                    "chat_documents": (
+                        chat_documents
+                        if chat_documents
+                        else []
+                    ),
+
+                    "chat_distances": (
+                        chat_distances[:len(chat_documents)]
+                        if chat_documents
+                        else []
+                    ),
                 }
             )
 
@@ -2148,10 +2354,58 @@ if user_input:
             # SAVE ANSWER
             # =================================================
 
+            final_reasoning_parts = []
+
+            if reasoning_text:
+
+                final_reasoning_parts.append(
+                    reasoning_text.strip()
+                )
+
+            if inline_reasoning_text:
+
+                final_reasoning_parts.append(
+                    inline_reasoning_text.strip()
+                )
+
+            final_reasoning = "\n\n".join(
+                final_reasoning_parts
+            ).strip()
+
             st.session_state.messages.append(
                 {
                     "role": "assistant",
                     "content": answer_text,
+
+                    "reasoning": final_reasoning,
+
+                    "formulas": formula_context,
+
+                    "constants": constant_context,
+
+                    "documents": (
+                        documents
+                        if documents
+                        else []
+                    ),
+
+                    "document_distances": (
+                        distances[:len(documents)]
+                        if documents
+                        else []
+                    ),
+
+                    "chat_documents": (
+                        chat_documents
+                        if chat_documents
+                        else []
+                    ),
+
+                    "chat_distances": (
+                        chat_distances[:len(chat_documents)]
+                        if chat_documents
+                        else []
+                    ),
                 }
             )
 
