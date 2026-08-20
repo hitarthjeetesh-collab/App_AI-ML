@@ -648,14 +648,6 @@ with st.sidebar:
     # MEMORY
     # ========================================================
 
-    st.subheader(
-        "Engineering Memory"
-    )
-
-    # --------------------------------------------------------
-    # CLEAR ENGINEERING MEMORY
-    # --------------------------------------------------------
-
     with st.container(border=True):
 
         st.markdown(
