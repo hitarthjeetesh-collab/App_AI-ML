@@ -23,9 +23,23 @@ client = OpenAI(
 )
 
 DB_PATH = os.path.join(tempfile.gettempdir(), "chroma_db")
-db = chromadb.PersistentClient(path=DB_PATH)
-brain = db.get_or_create_collection("documents")
-memory = db.get_or_create_collection("conversations")
+
+db = chromadb.PersistentClient(
+    path=DB_PATH
+)
+
+brain = db.get_or_create_collection(
+    "documents"
+)
+
+memory = db.get_or_create_collection(
+    "conversations"
+)
+
+# Persistent engineering memory
+engineering_memory_db = db.get_or_create_collection(
+    "engineering_memory"
+)
 
 
 # ============================================================
@@ -48,11 +62,19 @@ MAX_CHAT_CONTEXT_CHARS = 4500
 
 MAX_STORED_ANSWER_CHARS = 1200
 
-# Maximum number of formulas retrieved for one question.
 MAX_FORMULAS = 4
 
-# Maximum number of engineering constants retrieved for one question.
 MAX_CONSTANTS = 4
+
+
+# ============================================================
+# MODEL CAPABILITIES
+# ============================================================
+
+MODELS_WITH_REASONING = {
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+}
 
 
 # ============================================================
@@ -62,7 +84,8 @@ MAX_CONSTANTS = 4
 def chunk_it(text, size=1800):
 
     bits = text.split(". ")
-    chunks, current = [], ""
+    chunks = []
+    current = ""
 
     for bit in bits:
 
@@ -73,12 +96,16 @@ def chunk_it(text, size=1800):
         else:
 
             if current.strip():
-                chunks.append(current.strip())
+                chunks.append(
+                    current.strip()
+                )
 
             current = bit + ". "
 
     if current.strip():
-        chunks.append(current.strip())
+        chunks.append(
+            current.strip()
+        )
 
     return chunks
 
@@ -162,6 +189,86 @@ def store_messages(question, answer):
 
 
 # ============================================================
+# ENGINEERING MEMORY PERSISTENCE
+# ============================================================
+
+def load_engineering_memory():
+
+    try:
+
+        result = engineering_memory_db.get(
+            ids=["engineering_memory"]
+        )
+
+        documents = result.get(
+            "documents",
+            [],
+        )
+
+        if documents:
+
+            return clean_memory(
+                documents[0]
+            )
+
+    except Exception:
+
+        pass
+
+    return ""
+
+
+def save_engineering_memory(memory_text):
+
+    memory_text = clean_memory(
+        memory_text
+    )
+
+    if not memory_text:
+
+        try:
+
+            engineering_memory_db.delete(
+                ids=["engineering_memory"]
+            )
+
+        except Exception:
+
+            pass
+
+        return
+
+    engineering_memory_db.upsert(
+        ids=[
+            "engineering_memory"
+        ],
+        documents=[
+            memory_text
+        ],
+        metadatas=[
+            {
+                "kind": "engineering_memory"
+            }
+        ],
+    )
+
+
+def clear_engineering_memory():
+
+    st.session_state.engineering_memory = ""
+
+    try:
+
+        engineering_memory_db.delete(
+            ids=["engineering_memory"]
+        )
+
+    except Exception:
+
+        pass
+
+
+# ============================================================
 # RATE LIMIT HANDLING
 # ============================================================
 
@@ -230,6 +337,7 @@ def get_retry_seconds(error):
                 )
 
             except ValueError:
+
                 pass
 
     return None
@@ -308,7 +416,9 @@ if "messages" not in st.session_state:
 
 if "engineering_memory" not in st.session_state:
 
-    st.session_state.engineering_memory = ""
+    st.session_state.engineering_memory = (
+        load_engineering_memory()
+    )
 
 
 # ============================================================
@@ -431,10 +541,6 @@ def clean_memory(memory):
 # ============================================================
 
 with st.sidebar:
-
-    # ========================================================
-    # DESTRUCTIVE BUTTON STYLING
-    # ========================================================
 
     st.markdown(
         """
@@ -587,7 +693,9 @@ with st.sidebar:
             f"{code} — "
             f"{CURRENCIES[code][1]}"
         ),
-        index=list(CURRENCIES.keys()).index("CAD")
+        index=list(
+            CURRENCIES.keys()
+        ).index("CAD"),
     )
 
     # ========================================================
@@ -672,7 +780,7 @@ with st.sidebar:
             type="primary",
         ):
 
-            st.session_state.engineering_memory = ""
+            clear_engineering_memory()
 
             st.rerun()
 
@@ -711,10 +819,6 @@ with st.sidebar:
             st.session_state.messages = []
 
             st.rerun()
-
-        # ----------------------------------------------------
-        # CHAT COUNT
-        # ----------------------------------------------------
 
         st.caption(
             f"{len(st.session_state.messages)} "
@@ -927,10 +1031,6 @@ def build_messages():
         }
     ]
 
-    # --------------------------------------------------------
-    # ENGINEERING MEMORY
-    # --------------------------------------------------------
-
     engineering_memory = (
         st.session_state.engineering_memory
     )
@@ -946,10 +1046,6 @@ def build_messages():
                 ),
             }
         )
-
-    # --------------------------------------------------------
-    # RECENT CHAT
-    # --------------------------------------------------------
 
     recent_messages = (
         st.session_state.messages[
@@ -975,10 +1071,6 @@ def extract_response(raw_text):
         return "", "", ""
 
     working_text = raw_text
-
-    # --------------------------------------------------------
-    # EXTRACT <think>...</think>
-    # --------------------------------------------------------
 
     reasoning_parts = []
 
@@ -1007,10 +1099,6 @@ def extract_response(raw_text):
         working_text,
     )
 
-    # --------------------------------------------------------
-    # HANDLE OPEN <think>
-    # --------------------------------------------------------
-
     open_think_match = re.search(
         r"<think>\s*(.*)$",
         working_text,
@@ -1035,10 +1123,6 @@ def extract_response(raw_text):
                 :open_think_match.start()
             ]
         )
-
-    # --------------------------------------------------------
-    # EXTRACT MEMORY
-    # --------------------------------------------------------
 
     memory_match = re.search(
         r"<memory>\s*(.*?)\s*</memory>",
@@ -1068,10 +1152,6 @@ def extract_response(raw_text):
 
         memory_text = ""
 
-    # --------------------------------------------------------
-    # HANDLE OPEN MEMORY
-    # --------------------------------------------------------
-
     open_memory_match = re.search(
         r"<memory>\s*(.*)$",
         answer,
@@ -1087,10 +1167,6 @@ def extract_response(raw_text):
             .rstrip()
         )
 
-    # --------------------------------------------------------
-    # COMBINE REASONING
-    # --------------------------------------------------------
-
     inline_reasoning = (
         "\n\n".join(
             reasoning_parts
@@ -1103,6 +1179,31 @@ def extract_response(raw_text):
         inline_reasoning,
         memory_text,
     )
+
+
+# ============================================================
+# API PARAMETERS
+# ============================================================
+
+def build_api_parameters(
+    model,
+    messages,
+):
+
+    parameters = {
+        "model": model,
+        "messages": messages,
+        "temperature": creativity,
+        "max_completion_tokens": MAX_COMPLETION_TOKENS,
+    }
+
+    if model in MODELS_WITH_REASONING:
+
+        parameters[
+            "reasoning_effort"
+        ] = reasoning_effort
+
+    return parameters
 
 
 # ============================================================
@@ -1129,25 +1230,13 @@ for message in st.session_state.messages:
         ),
     ):
 
-        # ----------------------------------------------------
-        # USER MESSAGE
-        # ----------------------------------------------------
-
         if message["role"] == "user":
 
             render_markdown(
                 message["content"]
             )
 
-        # ----------------------------------------------------
-        # ASSISTANT MESSAGE
-        # ----------------------------------------------------
-
         else:
-
-            # =================================================
-            # ENGINEERING PROCESS
-            # =================================================
 
             reasoning = message.get(
                 "reasoning",
@@ -1170,10 +1259,6 @@ for message in st.session_state.messages:
                     st.markdown(
                         "*No separate reasoning was returned by the model.*"
                     )
-
-            # =================================================
-            # WHAT I LOOKED UP
-            # =================================================
 
             documents = message.get(
                 "documents",
@@ -1202,10 +1287,6 @@ for message in st.session_state.messages:
                             f"{doc[:70]}"
                         )
 
-            # =================================================
-            # PAST CHAT SEARCH
-            # =================================================
-
             chat_documents = message.get(
                 "chat_documents",
                 [],
@@ -1233,10 +1314,6 @@ for message in st.session_state.messages:
                             f"{chat[:70]}"
                         )
 
-            # =================================================
-            # FORMULAS
-            # =================================================
-
             formulas = message.get(
                 "formulas",
                 "",
@@ -1255,10 +1332,6 @@ for message in st.session_state.messages:
                         )
                     )
 
-            # =================================================
-            # ENGINEERING CONSTANTS
-            # =================================================
-
             constants = message.get(
                 "constants",
                 "",
@@ -1276,10 +1349,6 @@ for message in st.session_state.messages:
                             constants
                         )
                     )
-
-            # =================================================
-            # FINAL ANSWER
-            # =================================================
 
             render_markdown(
                 message["content"]
@@ -1303,7 +1372,6 @@ rate_limited = remaining > 0
 if rate_limited:
 
     minutes = remaining // 60
-
     seconds = remaining % 60
 
     if minutes > 0:
@@ -1364,7 +1432,6 @@ if rate_limited:
 else:
 
     st.session_state.rate_limit_until = 0
-
     st.session_state.rate_limit_type = None
 
 
@@ -1442,6 +1509,12 @@ if user_input:
     formula_context = ""
     constant_context = ""
 
+    documents = []
+    distances = []
+
+    chat_documents = []
+    chat_distances = []
+
     # ========================================================
     # FORMULA SEARCH
     # ========================================================
@@ -1457,7 +1530,9 @@ if user_input:
 
         except TypeError:
 
-            formula_context = get_relevant_formulas(prompt)
+            formula_context = get_relevant_formulas(
+                prompt
+            )
 
         except Exception:
 
@@ -1465,13 +1540,19 @@ if user_input:
 
         if formula_context:
 
-            if isinstance(formula_context, list):
+            if isinstance(
+                formula_context,
+                list,
+            ):
+
                 formula_context = "\n\n".join(
                     str(item)
                     for item in formula_context
                 )
 
-            formula_context = str(formula_context)
+            formula_context = str(
+                formula_context
+            )
 
             notes += (
                 "FORMULAS:\n"
@@ -1493,7 +1574,9 @@ if user_input:
 
         except TypeError:
 
-            constant_context = get_relevant_constants(prompt)
+            constant_context = get_relevant_constants(
+                prompt
+            )
 
         except Exception:
 
@@ -1501,13 +1584,19 @@ if user_input:
 
         if constant_context:
 
-            if isinstance(constant_context, list):
+            if isinstance(
+                constant_context,
+                list,
+            ):
+
                 constant_context = "\n\n".join(
                     str(item)
                     for item in constant_context
                 )
 
-            constant_context = str(constant_context)
+            constant_context = str(
+                constant_context
+            )
 
             if notes:
                 notes += "\n\n"
@@ -1546,10 +1635,6 @@ if user_input:
             [[]],
         )[0]
 
-        # ----------------------------------------------------
-        # Limit retrieved document context
-        # ----------------------------------------------------
-
         selected_documents = []
 
         document_chars = 0
@@ -1581,10 +1666,6 @@ if user_input:
 
         documents = selected_documents
 
-        # ----------------------------------------------------
-        # BUILD DOCUMENT NOTES
-        # ----------------------------------------------------
-
         if documents:
 
             if notes:
@@ -1596,10 +1677,6 @@ if user_input:
                     documents
                 )
             )
-
-            # ------------------------------------------------
-            # SHOW WHAT WAS RETRIEVED
-            # ------------------------------------------------
 
             with st.expander(
                 "What I looked up"
@@ -1646,10 +1723,6 @@ if user_input:
             [[]],
         )[0]
 
-        # ----------------------------------------------------
-        # Limit retrieved past-chat context
-        # ----------------------------------------------------
-
         selected_chat_documents = []
 
         chat_chars = 0
@@ -1683,10 +1756,6 @@ if user_input:
             selected_chat_documents
         )
 
-        # ----------------------------------------------------
-        # BUILD CHAT NOTES
-        # ----------------------------------------------------
-
         if chat_documents:
 
             if notes:
@@ -1698,10 +1767,6 @@ if user_input:
                     chat_documents
                 )
             )
-
-            # ------------------------------------------------
-            # SHOW WHAT WAS RETRIEVED
-            # ------------------------------------------------
 
             with st.expander(
                 "What I looked up from past chats"
@@ -1790,17 +1855,9 @@ if user_input:
 
             try:
 
-                # --------------------------------------------
-                # COPY NORMAL CHAT CONTEXT
-                # --------------------------------------------
-
                 stream_messages = (
                     request_messages.copy()
                 )
-
-                # --------------------------------------------
-                # ADD RAG + FORMULA CONTEXT
-                # --------------------------------------------
 
                 if notes_prompt:
 
@@ -1811,31 +1868,24 @@ if user_input:
                         }
                     )
 
-                # --------------------------------------------
-                # API REQUEST
-                # --------------------------------------------
+                api_parameters = (
+                    build_api_parameters(
+                        model,
+                        stream_messages,
+                    )
+                )
+
+                api_parameters["stream"] = True
 
                 stream = (
                     client.chat.completions.create(
-                        model=model,
-                        messages=stream_messages,
-                        temperature=creativity,
-                        reasoning_effort=reasoning_effort,
-                        max_completion_tokens=MAX_COMPLETION_TOKENS,
-                        stream=True,
+                        **api_parameters
                     )
                 )
 
             except Exception as e:
 
-                # --------------------------------------------
-                # RATE LIMIT
-                # --------------------------------------------
-
-                if (
-                    get_rate_limit_type(e)
-                    is not None
-                ):
+                if get_rate_limit_type(e) is not None:
 
                     cooldown = (
                         handle_rate_limit_error(
@@ -1907,9 +1957,7 @@ if user_input:
                 expanded=True,
             ):
 
-                thinking_placeholder = (
-                    st.empty()
-                )
+                thinking_placeholder = st.empty()
 
             # =================================================
             # ANSWER
@@ -1918,9 +1966,7 @@ if user_input:
             answer_placeholder = st.empty()
 
             reasoning_text = ""
-
             inline_reasoning_text = ""
-
             raw_answer_text = ""
 
             # =================================================
@@ -1936,10 +1982,6 @@ if user_input:
                     chunk.choices[0].delta
                 )
 
-                # =============================================
-                # NATIVE API REASONING
-                # =============================================
-
                 reasoning = getattr(
                     delta,
                     "reasoning",
@@ -1948,13 +1990,7 @@ if user_input:
 
                 if reasoning:
 
-                    reasoning_text += (
-                        reasoning
-                    )
-
-                # =============================================
-                # FINAL RESPONSE
-                # =============================================
+                    reasoning_text += reasoning
 
                 content = getattr(
                     delta,
@@ -1964,13 +2000,7 @@ if user_input:
 
                 if content:
 
-                    raw_answer_text += (
-                        content
-                    )
-
-                # =============================================
-                # PARSE CONTENT
-                # =============================================
+                    raw_answer_text += content
 
                 (
                     visible_answer,
@@ -1983,10 +2013,6 @@ if user_input:
                 inline_reasoning_text = (
                     inline_reasoning
                 )
-
-                # =============================================
-                # DISPLAY ENGINEERING PROCESS
-                # =============================================
 
                 combined_reasoning_parts = []
 
@@ -2012,9 +2038,11 @@ if user_input:
                         )
                     )
 
-                # =============================================
-                # DISPLAY FINAL ANSWER
-                # =============================================
+                else:
+
+                    thinking_placeholder.markdown(
+                        "*Thinking...*"
+                    )
 
                 answer_placeholder.markdown(
                     clean_latex(
@@ -2035,7 +2063,7 @@ if user_input:
             )
 
             # =================================================
-            # UPDATE MEMORY
+            # UPDATE + PERSIST MEMORY
             # =================================================
 
             if new_memory:
@@ -2044,8 +2072,12 @@ if user_input:
                     new_memory
                 )
 
+                save_engineering_memory(
+                    new_memory
+                )
+
             # =================================================
-            # REASONING FALLBACK
+            # REASONING
             # =================================================
 
             combined_reasoning_parts = []
@@ -2082,22 +2114,8 @@ if user_input:
             # SAVE FINAL ANSWER
             # =================================================
 
-            final_reasoning_parts = []
-
-            if reasoning_text.strip():
-
-                final_reasoning_parts.append(
-                    reasoning_text.strip()
-                )
-
-            if inline_reasoning_text.strip():
-
-                final_reasoning_parts.append(
-                    inline_reasoning_text.strip()
-                )
-
             final_reasoning = "\n\n".join(
-                final_reasoning_parts
+                combined_reasoning_parts
             ).strip()
 
             st.session_state.messages.append(
@@ -2118,7 +2136,9 @@ if user_input:
                     ),
 
                     "document_distances": (
-                        distances[:len(documents)]
+                        distances[
+                            :len(documents)
+                        ]
                         if documents
                         else []
                     ),
@@ -2130,7 +2150,9 @@ if user_input:
                     ),
 
                     "chat_distances": (
-                        chat_distances[:len(chat_documents)]
+                        chat_distances[
+                            :len(chat_documents)
+                        ]
                         if chat_documents
                         else []
                     ),
@@ -2154,17 +2176,9 @@ if user_input:
 
                 try:
 
-                    # ----------------------------------------
-                    # COPY NORMAL CHAT CONTEXT
-                    # ----------------------------------------
-
                     response_messages = (
                         request_messages.copy()
                     )
-
-                    # ----------------------------------------
-                    # ADD RAG + FORMULA CONTEXT
-                    # ----------------------------------------
 
                     if notes_prompt:
 
@@ -2175,30 +2189,22 @@ if user_input:
                             }
                         )
 
-                    # ----------------------------------------
-                    # API REQUEST
-                    # ----------------------------------------
+                    api_parameters = (
+                        build_api_parameters(
+                            model,
+                            response_messages,
+                        )
+                    )
 
                     response = (
                         client.chat.completions.create(
-                            model=model,
-                            messages=response_messages,
-                            temperature=creativity,
-                            reasoning_effort=reasoning_effort,
-                            max_completion_tokens=MAX_COMPLETION_TOKENS,
+                            **api_parameters
                         )
                     )
 
                 except Exception as e:
 
-                    # ----------------------------------------
-                    # RATE LIMIT
-                    # ----------------------------------------
-
-                    if (
-                        get_rate_limit_type(e)
-                        is not None
-                    ):
+                    if get_rate_limit_type(e) is not None:
 
                         cooldown = (
                             handle_rate_limit_error(
@@ -2274,7 +2280,7 @@ if user_input:
             )
 
             # =================================================
-            # EXTRACT ANSWER + REASONING + MEMORY
+            # EXTRACT
             # =================================================
 
             (
@@ -2286,7 +2292,7 @@ if user_input:
             )
 
             # =================================================
-            # UPDATE MEMORY
+            # UPDATE + PERSIST MEMORY
             # =================================================
 
             if new_memory:
@@ -2295,8 +2301,12 @@ if user_input:
                     new_memory
                 )
 
+                save_engineering_memory(
+                    new_memory
+                )
+
             # =================================================
-            # GET NATIVE API REASONING
+            # NATIVE API REASONING
             # =================================================
 
             reasoning_text = getattr(
@@ -2354,22 +2364,8 @@ if user_input:
             # SAVE ANSWER
             # =================================================
 
-            final_reasoning_parts = []
-
-            if reasoning_text:
-
-                final_reasoning_parts.append(
-                    reasoning_text.strip()
-                )
-
-            if inline_reasoning_text:
-
-                final_reasoning_parts.append(
-                    inline_reasoning_text.strip()
-                )
-
             final_reasoning = "\n\n".join(
-                final_reasoning_parts
+                combined_reasoning_parts
             ).strip()
 
             st.session_state.messages.append(
@@ -2390,7 +2386,9 @@ if user_input:
                     ),
 
                     "document_distances": (
-                        distances[:len(documents)]
+                        distances[
+                            :len(documents)
+                        ]
                         if documents
                         else []
                     ),
@@ -2402,7 +2400,9 @@ if user_input:
                     ),
 
                     "chat_distances": (
-                        chat_distances[:len(chat_documents)]
+                        chat_distances[
+                            :len(chat_documents)
+                        ]
                         if chat_documents
                         else []
                     ),
