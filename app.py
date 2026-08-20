@@ -42,8 +42,8 @@ body::after {
 
     mask-image: linear-gradient(
         to bottom,
-        black,
-        transparent 85%
+        white,
+        transparent 10%
     );
 }
 </style>
