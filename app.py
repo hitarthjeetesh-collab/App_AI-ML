@@ -45,13 +45,9 @@ body::after {
         white,
         transparent 10%
     );
-}
-</style>
-""", unsafe_allow_html=True)
-st.markdown("""
-<style>
 stApp::before {
     box-shadow: inset 0 0 180px rgba(0, 0, 0, 0.35);
+}
 }
 </style>
 """, unsafe_allow_html=True)
