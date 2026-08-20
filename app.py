@@ -27,7 +27,12 @@ memory = db.get_or_create_collection("conversations")
 
 st.markdown("""
 <style>
-    .stApp {
+    html, body, [data-testid="stAppViewContainer"] {
+        min-height: 100%;
+        background: #080C11 !important;
+    }
+
+    [data-testid="stAppViewContainer"] {
         background:
             radial-gradient(
                 circle at 15% 5%,
@@ -44,7 +49,18 @@ st.markdown("""
                 rgba(76, 141, 255, 0.05),
                 transparent 35%
             ),
-            #080C11;
+            #080C11 !important;
+        background-attachment: fixed;
+        min-height: 100vh;
+    }
+
+    .stApp {
+        background: transparent !important;
+        min-height: 100vh;
+    }
+
+    [data-testid="stAppViewContainer"] > .main {
+        background: transparent !important;
     }
 </style>
 """, unsafe_allow_html=True)
