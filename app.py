@@ -23,7 +23,7 @@ client = OpenAI(
 
 db = chromadb.PersistentClient(path="./chromadb")
 brain = db.get_or_create_collection("documents")
-memory = db.get_or_create_collection("converstations")
+memory = db.get_or_create_collection("conversations")
 
 
 # ============================================================
