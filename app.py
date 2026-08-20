@@ -8,6 +8,7 @@ from doc_helper import read_file
 from formula_library import get_relevant_formulas
 from engineering_constants import get_relevant_constants
 import time
+import tempfile
 
 
 # ============================================================
@@ -18,10 +19,11 @@ load_dotenv()
 
 client = OpenAI(
     base_url="https://api.groq.com/openai/v1",
-    api_key=os.getenv("GROQ_API_KEY"),
+    api_key=os.getenv("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY"),
 )
 
-db = chromadb.PersistentClient(path="./chromadb")
+DB_PATH = os.path.join(tempfile.gettempdir(), "chroma_db")
+db = chromadb.PersistentClient(path=DB_PATH)
 brain = db.get_or_create_collection("documents")
 memory = db.get_or_create_collection("conversations")
 
