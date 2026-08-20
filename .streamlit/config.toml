@@ -1,5 +1,38 @@
 [theme]
-primaryColor = "#00A6C7"
-backgroundColor = "#0A0F14"
-secondaryBackgroundColor = "#141C24"
-textColor = "#E6EDF3"
+primaryColor = "#00B8D9"
+backgroundColor = "#080C11"
+secondaryBackgroundColor = "#111820"
+textColor = "#E8EEF4"
+font = "Inter"
+headingFont = "Space Grotesk"
+baseRadius = "medium"
+
+[[theme.fontfaces]]
+fontFamily = "Inter"
+fontWeight = 400
+fontStyle = "normal"
+url = "https://fonts.googleapis.com/css2?family=Inter:wght@400&display=swap"
+
+[[theme.fontfaces]]
+fontFamily = "Inter"
+fontWeight = 500
+fontStyle = "normal"
+url = "https://fonts.googleapis.com/css2?family=Inter:wght@500&display=swap"
+
+[[theme.fontfaces]]
+fontFamily = "Inter"
+fontWeight = 600
+fontStyle = "normal"
+url = "https://fonts.googleapis.com/css2?family=Inter:wght@600&display=swap"
+
+[[theme.fontfaces]]
+fontFamily = "Space Grotesk"
+fontWeight = 500
+fontStyle = "normal"
+url = "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500&display=swap"
+
+[[theme.fontfaces]]
+fontFamily = "Space Grotesk"
+fontWeight = 600
+fontStyle = "normal"
+url = "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600&display=swap"
