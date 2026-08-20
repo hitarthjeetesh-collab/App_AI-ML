@@ -27,41 +27,50 @@ memory = db.get_or_create_collection("conversations")
 
 st.markdown("""
 <style>
-    html, body, [data-testid="stAppViewContainer"] {
-        min-height: 100%;
-        background: #080C11 !important;
-    }
+/* Completely remove Streamlit's default background layers */
+html,
+body,
+.stApp,
+[data-testid="stAppViewContainer"],
+[data-testid="stAppViewContainer"] > .main {
+    background: transparent !important;
+}
 
-    [data-testid="stAppViewContainer"] {
-        background:
-            radial-gradient(
-                circle at 15% 5%,
-                rgba(0, 184, 217, 0.10),
-                transparent 28%
-            ),
-            radial-gradient(
-                circle at 85% 15%,
-                rgba(139, 92, 246, 0.08),
-                transparent 30%
-            ),
-            radial-gradient(
-                circle at 50% 100%,
-                rgba(76, 141, 255, 0.05),
-                transparent 35%
-            ),
-            #080C11 !important;
-        background-attachment: fixed;
-        min-height: 100vh;
-    }
+/* Full-screen background */
+.stApp::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
 
-    .stApp {
-        background: transparent !important;
-        min-height: 100vh;
-    }
+    background:
+        radial-gradient(
+            circle at 15% 5%,
+            rgba(0, 184, 217, 0.10),
+            transparent 28%
+        ),
+        radial-gradient(
+            circle at 85% 15%,
+            rgba(139, 92, 246, 0.08),
+            transparent 30%
+        ),
+        radial-gradient(
+            circle at 50% 100%,
+            rgba(76, 141, 255, 0.05),
+            transparent 35%
+        ),
+        #080C11;
 
-    [data-testid="stAppViewContainer"] > .main {
-        background: transparent !important;
-    }
+    z-index: -1;
+    pointer-events: none;
+}
+
+/* Keep the actual app above the background */
+.stApp {
+    position: relative;
+    min-height: 100vh;
+}
 </style>
 """, unsafe_allow_html=True)
 
