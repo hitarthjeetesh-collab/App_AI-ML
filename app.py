@@ -584,7 +584,7 @@ with st.sidebar:
             f"{code} — "
             f"{CURRENCIES[code][1]}"
         ),
-        index=list(CURRENCIES.keys()).index("USD")
+        index=list(CURRENCIES.keys()).index("CAD")
     )
 
     # ========================================================
