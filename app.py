@@ -436,9 +436,6 @@ with st.sidebar:
     st.markdown(
         """
         <style>
-        /* Only Streamlit primary buttons are red.
-           The four destructive buttons below use type="primary". */
-
         button[kind="primary"] {
             background-color: #d32f2f !important;
             border-color: #d32f2f !important;
@@ -655,106 +652,128 @@ with st.sidebar:
         "Engineering Memory"
     )
 
-    if st.button(
-        "Clear engineering memory",
-        use_container_width=True,
-        type="primary",
-    ):
+    # --------------------------------------------------------
+    # CLEAR ENGINEERING MEMORY
+    # --------------------------------------------------------
 
-        st.session_state.engineering_memory = ""
+    with st.container(border=True):
 
-        st.rerun()
-
-    if st.session_state.engineering_memory:
-
-        st.caption(
-            f"{len(st.session_state.engineering_memory)} "
-            f"/ {MAX_ENGINEERING_MEMORY_CHARS} characters"
+        st.markdown(
+            """
+            <div style="
+                color: #ff4b4b;
+                font-weight: 600;
+                font-size: 0.95rem;
+                margin-bottom: 0.5rem;
+            ">
+                Danger Zone
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
-        with st.expander(
-            "View memory",
-            expanded=False,
+        if st.button(
+            "Clear engineering memory",
+            use_container_width=True,
+            type="primary",
         ):
 
-            st.markdown(
-                st.session_state.engineering_memory
+            st.session_state.engineering_memory = ""
+
+            st.rerun()
+
+        if st.session_state.engineering_memory:
+
+            st.caption(
+                f"{len(st.session_state.engineering_memory)} "
+                f"/ {MAX_ENGINEERING_MEMORY_CHARS} characters"
             )
 
-    else:
+            with st.expander(
+                "View memory",
+                expanded=False,
+            ):
+
+                st.markdown(
+                    st.session_state.engineering_memory
+                )
+
+        else:
+
+            st.caption(
+                "No engineering memory stored."
+            )
+
+        # ----------------------------------------------------
+        # CLEAR CHAT
+        # ----------------------------------------------------
+
+        if st.button(
+            "Clear chat",
+            use_container_width=True,
+            type="primary",
+        ):
+
+            st.session_state.messages = []
+
+            st.rerun()
+
+        # ----------------------------------------------------
+        # CHAT COUNT
+        # ----------------------------------------------------
 
         st.caption(
-            "No engineering memory stored."
+            f"{len(st.session_state.messages)} "
+            f"messages in this chat"
         )
 
-    # ========================================================
-    # CLEAR CHAT
-    # ========================================================
+        # ----------------------------------------------------
+        # DOCUMENT DATABASE
+        # ----------------------------------------------------
 
-    if st.button(
-        "Clear chat",
-        use_container_width=True,
-        type="primary",
-    ):
+        if st.button(
+            "clear documents",
+            use_container_width=True,
+            type="primary",
+        ):
 
-        st.session_state.messages = []
+            db.delete_collection(
+                "documents"
+            )
 
-        st.rerun()
+            brain = db.get_or_create_collection(
+                "documents"
+            )
 
-    # ========================================================
-    # CHAT COUNT
-    # ========================================================
+            st.rerun()
 
-    st.caption(
-        f"{len(st.session_state.messages)} "
-        f"messages in this chat"
-    )
-
-    # ========================================================
-    # DOCUMENT DATABASE
-    # ========================================================
-
-    if st.button(
-        "clear documents",
-        type="primary",
-    ):
-
-        db.delete_collection(
-            "documents"
+        st.caption(
+            f"{brain.count()} chunks inside the chat"
         )
 
-        brain = db.get_or_create_collection(
-            "documents"
+        # ----------------------------------------------------
+        # CLEAR ALL PAST CHATS
+        # ----------------------------------------------------
+
+        if st.button(
+            "Clear all past chats",
+            use_container_width=True,
+            type="primary",
+        ):
+
+            db.delete_collection(
+                "converstations"
+            )
+
+            memory = db.get_or_create_collection(
+                "converstations"
+            )
+
+            st.rerun()
+
+        st.caption(
+            f"{memory.count()} past chats stored in the database"
         )
-
-        st.rerun()
-
-    st.caption(
-        f"{brain.count()} chunks inside the chat"
-    )
-
-    # ========================================================
-    # CLEAR ALL PAST CHATS
-    # ========================================================
-
-    if st.button(
-        "Clear all past chats",
-        type="primary",
-    ):
-
-        db.delete_collection(
-            "converstations"
-        )
-
-        memory = db.get_or_create_collection(
-            "converstations"
-        )
-
-        st.rerun()
-
-    st.caption(
-        f"{memory.count()} past chats stored in the database"
-    )
 
 
 # ============================================================
