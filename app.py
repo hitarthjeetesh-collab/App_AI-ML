@@ -25,32 +25,6 @@ db = chromadb.PersistentClient(path="./chromadb")
 brain = db.get_or_create_collection("documents")
 memory = db.get_or_create_collection("conversations")
 
-st.markdown("""
-<style>
-body::after {
-    content: "";
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    z-index: -998;
-
-    background-image:
-        linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
-
-    background-size: 48px 48px;
-
-    mask-image: linear-gradient(
-        to bottom,
-        white,
-        transparent 10%
-    );
-stApp::before {
-    box-shadow: inset 0 0 180px rgba(0, 0, 0, 0.35);
-}
-}
-</style>
-""", unsafe_allow_html=True)
 
 # ============================================================
 # TOKEN OPTIMIZATION
