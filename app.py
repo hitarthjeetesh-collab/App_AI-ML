@@ -27,49 +27,24 @@ memory = db.get_or_create_collection("conversations")
 
 st.markdown("""
 <style>
-/* Completely remove Streamlit's default background layers */
-html,
-body,
-.stApp,
-[data-testid="stAppViewContainer"],
-[data-testid="stAppViewContainer"] > .main {
-    background: transparent !important;
-}
-
-/* Full-screen background */
-.stApp::before {
+body::after {
     content: "";
     position: fixed;
     inset: 0;
-    width: 100vw;
-    height: 100vh;
-
-    background:
-        radial-gradient(
-            circle at 15% 5%,
-            rgba(0, 184, 217, 0.10),
-            transparent 28%
-        ),
-        radial-gradient(
-            circle at 85% 15%,
-            rgba(139, 92, 246, 0.08),
-            transparent 30%
-        ),
-        radial-gradient(
-            circle at 50% 100%,
-            rgba(76, 141, 255, 0.05),
-            transparent 35%
-        ),
-        #080C11;
-
-    z-index: -1;
     pointer-events: none;
-}
+    z-index: -998;
 
-/* Keep the actual app above the background */
-.stApp {
-    position: relative;
-    min-height: 100vh;
+    background-image:
+        linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
+
+    background-size: 48px 48px;
+
+    mask-image: linear-gradient(
+        to bottom,
+        black,
+        transparent 85%
+    );
 }
 </style>
 """, unsafe_allow_html=True)
