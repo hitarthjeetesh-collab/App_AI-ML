@@ -469,8 +469,6 @@ with st.sidebar:
         (
             "openai/gpt-oss-120b",
             "openai/gpt-oss-20b",
-            "qwen/qwen3.6-27b",
-            "groq/compound-mini",
         ),
         index=0,
     )
