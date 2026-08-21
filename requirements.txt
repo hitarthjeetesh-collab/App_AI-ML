@@ -1,4 +1,7 @@
-#I need to lock them due to a compatiability issue I was getting and I didn't feel like spending time debugging it, as it was working fine with these versions.
+#I had to pin the versions due to a compatibility issue I encountered. 
+#Since everything was working reliably with these versions, 
+#I decided not to spend additional time debugging the compatibility issue.
+
 streamlit==1.61.1
 openai==3.3.0
 python-dotenv==1.2.3
