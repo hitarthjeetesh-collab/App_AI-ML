@@ -1043,7 +1043,6 @@ def build_messages():
     )
 
     if engineering_memory:
-
         messages.append(
             {
                 "role": "system",
@@ -1060,9 +1059,19 @@ def build_messages():
         ]
     )
 
-    messages.extend(
-        recent_messages
-    )
+    # Only send API-supported message fields.
+    for message in recent_messages:
+
+        role = message.get("role")
+        content = message.get("content")
+
+        if role in ("user", "assistant") and content:
+            messages.append(
+                {
+                    "role": role,
+                    "content": content,
+                }
+            )
 
     return messages
 
